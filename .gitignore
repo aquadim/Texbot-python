@@ -1,0 +1,4 @@
+__pycache__
+start.sh
+db.sqlite3
+fillData.py
