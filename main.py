@@ -9,11 +9,7 @@ import sys
 import random
 import os
 import json
-
-class TermColors:
-	RED   = "\033[91m"
-	GREEN = "\033[92m"
-	END  = "\033[0m"
+from utils import *
 
 class States:
 	reg_1 = 0
@@ -184,11 +180,11 @@ class Bot:
 		vid = user['vk_id']
 
 		if data['type'] == PayloadTypes.show_terms:
-            # Показ условий использования
+			# Показ условий использования
 			self.answerShowTerms(vid)
 			return False
 
-        if data['type'] == PayloadTypes.select_group:
+		if data['type'] == PayloadTypes.select_group:
 			# Выбрана группа.. но для чего?
 			if data['purpose'] == Purposes.registration:
 				# Для регистрации
@@ -200,7 +196,7 @@ class Bot:
 
 	def run(self):
 		"""Принимает и обрабатывает входящие события"""
-		print2("Бот онлайн", TermColors.GREEN)
+		print2("Бот онлайн", 'green')
 
 		for event in self.longpoll.listen():
 			if event.type == VkEventType.MESSAGE_NEW and event.to_me:
@@ -249,7 +245,7 @@ def vkAuth(args):
 		bot_token = args[tflag_index + 1]
 	except IndexError:
 		# Не указан токен после -t
-		print2("Не указан токен после параметра -t", TermColors.RED)
+		print2("Не указан токен после параметра -t", 'red')
 		sys.exit(1)
 	return vk_api.VkApi(token=bot_token)
 
@@ -257,7 +253,7 @@ def main(args):
 	"""Входная точка программы"""
 	# Проверяем аргументы
 	if not "-t" in args:
-		print2("Отсутствует параметр -t. Использование -t <vk token>", TermColors.RED)
+		print2("Отсутствует параметр -t. Использование -t <vk token>", 'red')
 		sys.exit(1)
 
 	# Инициализируем БД
