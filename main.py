@@ -12,18 +12,20 @@ import json
 from utils import *
 
 class States:
-	reg_1 = 0
-	select_course = 1
-	void = 2
-	reg_can_send = 3
-	hub = 4
+	reg_1			= 0
+	select_course	= 1
+	void			= 2
+	reg_can_send	= 3
+	hub				= 4
 
 class PayloadTypes:
-	select_group = 0	# Выбрать группу
-	show_terms = 1		# Показать условия использования
+	select_group= 0		# Выбор группы
+	show_terms	= 1		# Показать условия использования
+	select_date = 2		# Выбор даты
 
 class Purposes:
-	registration = 0 # Для регистрации
+	registration	= 0 # Для регистрации
+	stud_rasp_view	= 1 # Просмотр расписания студентом
 
 class Bot:
 	def __init__(self, session):
@@ -40,18 +42,31 @@ class Bot:
 		for key in self.keyboards:
 			self.keyboards[key] = json.dumps(self.keyboards[key])
 
+		# Кэширование
+		self.cached_images = {}
+
 		# ВКонтакте
 		self.api = session.get_api()
 		self.longpoll = VkLongPoll(session)
 
 	def send(self, vid, msg, kb = None, attach = None):
 		"""Отправляет сообщение пользователю"""
-		self.api.messages.send(
+		i = self.api.messages.send(
 			user_id = vid,
 			message = msg,
 			keyboard = kb,
 			attachments = attach,
-			random_id = random.randint(111111,999999)
+			random_id = 0
+		)
+
+	def edit(self, vid, msg_id, msg, kb = None, attach = None):
+		"""Изменяет сообщение"""
+		self.api.messages.edit(
+			peer_id = vid,
+			message = msg,
+			keyboard = kb,
+			attachments = attach,
+			message_id = msg_id
 		)
 
 	# ГЕНЕРАТОРЫ КЛАВИАТУР
@@ -59,7 +74,7 @@ class Bot:
 		"""Генерирует разметку клавиатуры для выбор группы"""
 		added = 0
 		kb = VkKeyboard(inline=True)
-		button_payload = {'ptype': 0, 'purpose': purpose}
+		button_payload = {'type': PayloadTypes.select_group, 'purpose': purpose}
 
 		for index, item in enumerate(data):
 			button_payload['gid'] = item['id']
@@ -69,6 +84,23 @@ class Bot:
 			if added % 3 == 0 and index != len(data) - 1:
 				kb.add_line()
 
+		return kb.get_keyboard()
+
+	def makeKeyboardSelectDate(self, purpose, msg_id):
+		"""Возвращает разметку клавиатры для выбора даты на основании данных в таблице pairs"""
+		dates = database.cmdGetDates()
+		if not dates:
+			return False
+
+		kb = VkKeyboard(inline=True)
+		message_id = random.randint(0, 10000000)
+		button_payload = {'type': PayloadTypes.select_date, 'purpose': purpose, 'msg_id': msg_id}
+
+		for index, item in enumerate(dates):
+			button_payload['date'] = item['day']
+			kb.add_button(item['label'], payload=button_payload)
+			if index != len(dates) - 1:
+				kb.add_line()
 		return kb.get_keyboard()
 	# КОНЕЦ ГЕНЕРАТОРОВ КЛАВИАТУР
 
@@ -101,7 +133,7 @@ class Bot:
 
 	def answerAskIfCanSend(self, vid, progress):
 		"""Вопрос: можно ли присылать рассылки"""
-		self.send(vid, self.answer['question_can_send_messages'].format(progress), self.keyboards['yn_text'])
+		self.send(vid, self.answers['question_can_send_messages'].format(progress), self.keyboards['yn_text'])
 
 	def answerWrongInput(self, vid):
 		"""Неверный ввод"""
@@ -111,11 +143,16 @@ class Bot:
 		"""Добро пожаловать"""
 		self.send(vid, self.answers['welcome_post_reg'], self.keyboards[keyboard_name])
 
-	def answerFunctionSchedule(self, vid):
-		"""Функция расписания"""
+	def answerSelectDate(self, vid, msg_id):
+		"""Выбор даты"""
+		keyboard = self.makeKeyboardSelectDate(Purposes.stud_rasp_view, msg_id + 1)
+		if not keyboard:
+			self.send(vid, self.answers['no_relevant_data'])
+		else:
+			self.send(vid, self.answers['pick_day'], kb=keyboard)
 	# КОНЕЦ ОТВЕТОВ БОТА
 
-	def handleMessage(self, text, user):
+	def handleMessage(self, text, user, e):
 		"""Принимает сообщение, обрабатывает, отвечает и сохраняет результат. Возвращает true, если данные пользователя
 		нужно обновить"""
 		vid = user['vk_id']
@@ -123,7 +160,8 @@ class Bot:
 		if user['state'] == States.hub:
 			# Выбор функции бота
 			if text == 'Расписание':
-				answerFunctionSchedule(vid)
+				self.answerSelectDate(vid, e.message_id)
+				return False
 
 		if user['state'] == States.void:
 			# Заглушка
@@ -136,7 +174,7 @@ class Bot:
 				user['type'] = 1
 				user['question_progress'] += 1
 				user['state'] = States.select_course
-				answerAskCourseNumber(vid, user['question_progress'])
+				self.answerAskCourseNumber(vid, user['question_progress'])
 				return True
 			elif text == 'Нет':
 				# Пользователь - преподаватель
@@ -144,20 +182,20 @@ class Bot:
 				return True
 			else:
 				# Неверный ввод
-				answerWrongInput(vid)
+				self.answerWrongInput(vid)
 				return False
 
 		if user['state'] == States.select_course:
 			# После "На каком ты курсе?" при регистрации
 			if not (text.isdigit() and 1 <= int(text) <= 4):
-				answerWrongInput(vid)
+				self.answerWrongInput(vid)
 				return False
 
 			user['state'] = States.void
 			user['question_progress'] += 1
 
 			available_names = database.cmdGetGroupsByCourse(text)
-			answerAskStudentGroup(vid, user['question_progress'], available_names)
+			self.answerAskStudentGroup(vid, user['question_progress'], available_names)
 
 			return True
 
@@ -175,7 +213,7 @@ class Bot:
 			self.answerPostRegistration(vid, 'stud_hub')
 			return True
 
-	def handleMessageWithPayload(self, data, user):
+	def handleMessageWithPayload(self, data, user, e):
 		"""handleMessage для сообщений с доп. данными"""
 		vid = user['vk_id']
 
@@ -187,12 +225,17 @@ class Bot:
 		if data['type'] == PayloadTypes.select_group:
 			# Выбрана группа.. но для чего?
 			if data['purpose'] == Purposes.registration:
-				# Для регистрации
 				user['gid'] = data['gid']
 				user['question_progress'] += 1
 				user['state'] = States.reg_can_send
 				self.answerAskIfCanSend(vid, user['question_progress'])
 				return True
+
+		if data['type'] == PayloadTypes.select_date:
+			# Выбрана дата.. но для чего?
+			if data['purpose'] == Purposes.stud_rasp_view:
+				self.edit(vid, data['msg_id'], "Текст изменён!")
+				return False
 
 	def run(self):
 		"""Принимает и обрабатывает входящие события"""
@@ -225,18 +268,13 @@ class Bot:
 				else:
 					# Не первый запуск
 					if has_payload:
-						need_update = self.handleMessageWithPayload(message_data, user)
+						need_update = self.handleMessageWithPayload(message_data, user, event)
 					else:
-						need_update = self.handleMessage(text, user)
+						need_update = self.handleMessage(text, user, event)
 
 					if need_update:
 						# Необходимо сохранение данных
 						database.cmdSaveUser(user)
-
-
-def print2(text, color):
-	"""Выводит цветной текст в консоль"""
-	print(color + text + TermColors.END)
 
 def vkAuth(args):
 	"""Возвращает объект vk_api.vk (для работы с api)"""

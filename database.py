@@ -27,7 +27,7 @@ def start():
 		"admin INTEGER DEFAULT 0,"
 		"type INTEGER DEFAULT 0,"
 		"question_progress INTEGER DEFAULT 1,"
-		"allows_mail INTEGER DEFAULT 0"
+		"allows_mail INTEGER DEFAULT 0,"
 		"PRIMARY KEY('id'))"
 	)
 
@@ -44,6 +44,29 @@ def start():
 		"spec TEXT,"
 		"join_year INTEGER,"
 		"class_teacher_vid INTEGER,"
+		"PRIMARY KEY('id'))"
+	)
+
+	# Таблица pairs
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS pairs("
+		"id INTEGER,"
+		"gid INTEGER,"
+		"day DATE,"
+		"time DATETIME,"
+		"sort INTEGER,"
+		"name TEXT,"
+		"cab INTEGER,"
+		"teacher_id INTEGER,"
+		"label TEXT,"
+		"PRIMARY KEY('id'))"
+	)
+
+	# Таблица teachers
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS teachers("
+		"id INTEGER,"
+		"surname TEXT,"
 		"PRIMARY KEY('id'))"
 	)
 
@@ -74,3 +97,42 @@ def cmdSaveUser(user):
 		"UPDATE users SET state=?, type=?, question_progress=?",
 		(user['state'], user['type'], user['question_progress']))
 	db.commit()
+
+def cmdGetGidFromString(name):
+	"""Возвращает id группы с названием name. Формат name: <Номер курса> <специальность>"""
+	try:
+		course, spec = name.split(' ')
+	except ValueError:
+		return False
+	response = cur.execute("SELECT id FROM groups WHERE course = ? AND spec = ?", (course, spec)).fetchone()
+	if not response:
+		return False
+	else:
+		return response['id']
+
+def cmdAddScheduleRecord(gid, date, time, sort, name, cab, teacher_id, label):
+	"""Добавляет запись о паре в таблицу pairs"""
+	cur.execute(
+		"INSERT INTO pairs (gid, day, time, sort, name, cab, teacher_id, label) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+		(gid, date, time, sort, name, cab, teacher_id, label)
+	)
+	db.commit()
+
+def cmdGetTeacherId(name):
+	"""Возвращает id преподавателя"""
+	response = cur.execute("SELECT id FROM teachers WHERE surname = ?", (name,)).fetchone()
+	if not response:
+		return False
+	else:
+		return response['id']
+
+def cmdGetDates():
+	"""Возвращает даты которые есть в pairs"""
+	response = cur.execute("SELECT DISTINCT day, label FROM pairs").fetchall()
+	if not response:
+		return False
+	else:
+		return response
+
+if __name__ == "__main__":
+	start()
