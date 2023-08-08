@@ -27,6 +27,7 @@ def start():
 		"admin INTEGER DEFAULT 0,"
 		"type INTEGER DEFAULT 0,"
 		"question_progress INTEGER DEFAULT 1,"
+		"allows_mail INTEGER DEFAULT 0"
 		"PRIMARY KEY('id'))"
 	)
 

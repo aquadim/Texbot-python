@@ -19,6 +19,8 @@ class States:
 	reg_1 = 0
 	select_course = 1
 	void = 2
+	reg_can_send = 3
+	hub = 4
 
 class PayloadTypes:
 	select_group = 0	# Выбрать группу
@@ -72,7 +74,6 @@ class Bot:
 				kb.add_line()
 
 		return kb.get_keyboard()
-
 	# КОНЕЦ ГЕНЕРАТОРОВ КЛАВИАТУР
 
 	# ОТВЕТЫ БОТА
@@ -102,9 +103,20 @@ class Bot:
 			self.makeKeyboardSelectGroup(group_names, Purposes.registration)
 		)
 
+	def answerAskIfCanSend(self, vid, progress):
+		"""Вопрос: можно ли присылать рассылки"""
+		self.send(vid, self.answer['question_can_send_messages'].format(progress), self.keyboards['yn_text'])
+
 	def answerWrongInput(self, vid):
 		"""Неверный ввод"""
 		self.send(vid, self.answers['wrong_input'])
+
+	def answerPostRegistration(self, vid, keyboard_name):
+		"""Добро пожаловать"""
+		self.send(vid, self.answers['welcome_post_reg'], self.keyboards[keyboard_name])
+
+	def answerFunctionSchedule(self, vid):
+		"""Функция расписания"""
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user):
@@ -112,7 +124,13 @@ class Bot:
 		нужно обновить"""
 		vid = user['vk_id']
 
+		if user['state'] == States.hub:
+			# Выбор функции бота
+			if text == 'Расписание':
+				answerFunctionSchedule(vid)
+
 		if user['state'] == States.void:
+			# Заглушка
 			return False
 
 		if user['state'] == States.reg_1:
@@ -147,13 +165,38 @@ class Bot:
 
 			return True
 
+		if user['state'] == States.reg_can_send:
+			# После "Можно ли отправлять сообщения?" при регистрации
+			if text == 'Да':
+				user['allows_mail'] = 1
+			elif text == 'Нет':
+				user['allows_mail'] = 0
+			else:
+				self.answerWrongInput(vid)
+				return False
+
+			user['state'] = States.hub
+			self.answerPostRegistration(vid, 'stud_hub')
+			return True
+
 	def handleMessageWithPayload(self, data, user):
 		"""handleMessage для сообщений с доп. данными"""
 		vid = user['vk_id']
 
 		if data['type'] == PayloadTypes.show_terms:
+            # Показ условий использования
 			self.answerShowTerms(vid)
 			return False
+
+        if data['type'] == PayloadTypes.select_group:
+			# Выбрана группа.. но для чего?
+			if data['purpose'] == Purposes.registration:
+				# Для регистрации
+				user['gid'] = data['gid']
+				user['question_progress'] += 1
+				user['state'] = States.reg_can_send
+				self.answerAskIfCanSend(vid, user['question_progress'])
+				return True
 
 	def run(self):
 		"""Принимает и обрабатывает входящие события"""
