@@ -1,3 +1,6 @@
+# database.py
+# Модуль для работы с БД
+
 import sqlite3 as sql
 
 # https://stackoverflow.com/a/3300514
@@ -14,7 +17,6 @@ cur = db.cursor()
 def start():
 	"""Создаёт необходимые таблицы в базе данных"""
 	# Таблица users
-	# id - id
 	# vk_id - id ВКонтакте
 	# state - состояние пользователя
 	# admin - администратор ли
@@ -32,7 +34,6 @@ def start():
 	)
 
 	# Таблица groups
-	# id - id
 	# course - номер курса
 	# spec - специальность
 	# join_year - год поступления
@@ -48,6 +49,14 @@ def start():
 	)
 
 	# Таблица pairs
+	# gid - id группы для этой пары
+	# day - день пары
+	# time - время пары
+	# sort - переменная для сортировки
+	# name - название пары
+	# cab - кабинет пары
+	# teacher_id - id преподавателя, ведующего эту пару
+	# label - более читаемая дата
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS pairs("
 		"id INTEGER,"
@@ -63,10 +72,23 @@ def start():
 	)
 
 	# Таблица teachers
+	# surname - фамилия
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS teachers("
 		"id INTEGER,"
 		"surname TEXT,"
+		"PRIMARY KEY('id'))"
+	)
+
+	# Таблица pair_cache - кэширование изображений расписаний пар
+	# gid - id группы
+	# date - дата расписания
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS pair_cache("
+		"id INTEGER,"
+		"gid INTEGER,"
+		"date DATE,"
+		"photo_id TEXT,"
 		"PRIMARY KEY('id'))"
 	)
 
@@ -133,6 +155,14 @@ def cmdGetDates():
 		return False
 	else:
 		return response
+
+def cmdGetCachedSchedule(gid, date):
+	"""Возвращает id кэшированного расписания если есть. Если нет, возвращает False"""
+	response = cur.execute("SELECT photo_id FROM pair_cache WHERE gid=? AND date=?", (gid, date))
+
+def cmdGetPairs(gid, date):
+	"""Возвращает пары группы на заданную дату"""
+	response = cur.execute("SELECT time, name, teachers.surname, cab FROM pairs LEFT JOIN teachers ON pairs.teacher_id=teachers.id WHERE gid=? AND day=? ORDER BY sort", (gid, date))
 
 if __name__ == "__main__":
 	start()

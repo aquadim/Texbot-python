@@ -1,7 +1,7 @@
 # main.py
 # Вадябот
 
-import vk_api
+import api
 from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import database
@@ -42,32 +42,18 @@ class Bot:
 		for key in self.keyboards:
 			self.keyboards[key] = json.dumps(self.keyboards[key])
 
+		# Загрузка настроек
+		with open(self.dir + "/config/config.json", 'r', encoding='utf-8') as f:
+			self.config = json.load(f)
+
 		# Кэширование
 		self.cached_images = {}
 
 		# ВКонтакте
-		self.api = session.get_api()
 		self.longpoll = VkLongPoll(session)
 
-	def send(self, vid, msg, kb = None, attach = None):
-		"""Отправляет сообщение пользователю"""
-		i = self.api.messages.send(
-			user_id = vid,
-			message = msg,
-			keyboard = kb,
-			attachments = attach,
-			random_id = 0
-		)
-
-	def edit(self, vid, msg_id, msg, kb = None, attach = None):
-		"""Изменяет сообщение"""
-		self.api.messages.edit(
-			peer_id = vid,
-			message = msg,
-			keyboard = kb,
-			attachments = attach,
-			message_id = msg_id
-		)
+	def getRandomWaitText(self):
+		return self.texts['wait'+str(random.randint(0,6))]
 
 	# ГЕНЕРАТОРЫ КЛАВИАТУР
 	def makeKeyboardSelectGroup(self, data, purpose):
@@ -107,25 +93,25 @@ class Bot:
 	# ОТВЕТЫ БОТА
 	def answerShowTerms(self, vid):
 		"""Показывает условия использования"""
-		self.send(vid, self.answers['tos'])
+		api.send(vid, self.answers['tos'])
 
 	def answerOnMeet(self, vid):
 		"""Первое взаимодействие с ботом"""
-		self.send(vid, self.answers['hi1'])
-		self.send(vid, self.answers['hi2'], self.keyboards['tos'])
+		api.send(vid, self.answers['hi1'])
+		api.send(vid, self.answers['hi2'], self.keyboards['tos'])
 		self.answerAskIfStudent(vid, 1)
 
 	def answerAskIfStudent(self, vid, progress):
 		"""Вопрос: Ты студент?"""
-		self.send(vid, self.answers['question_are_you_student'].format(progress), self.keyboards['yn_text'])
+		api.send(vid, self.answers['question_are_you_student'].format(progress), self.keyboards['yn_text'])
 
 	def answerAskCourseNumber(self, vid, progress):
 		"""Вопрос: На каком ты курсе?"""
-		self.send(vid, self.answers['question_what_is_your_course'].format(progress), self.keyboards['course_nums'])
+		api.send(vid, self.answers['question_what_is_your_course'].format(progress), self.keyboards['course_nums'])
 
 	def answerAskStudentGroup(self, vid, progress, group_names):
 		"""Вопрос: Какая из этих групп твоя?"""
-		self.send(
+		api.send(
 			vid,
 			self.answers['question_what_is_your_group'].format(progress),
 			self.makeKeyboardSelectGroup(group_names, Purposes.registration)
@@ -133,23 +119,37 @@ class Bot:
 
 	def answerAskIfCanSend(self, vid, progress):
 		"""Вопрос: можно ли присылать рассылки"""
-		self.send(vid, self.answers['question_can_send_messages'].format(progress), self.keyboards['yn_text'])
+		api.send(vid, self.answers['question_can_send_messages'].format(progress), self.keyboards['yn_text'])
 
 	def answerWrongInput(self, vid):
 		"""Неверный ввод"""
-		self.send(vid, self.answers['wrong_input'])
+		api.send(vid, self.answers['wrong_input'])
 
 	def answerPostRegistration(self, vid, keyboard_name):
 		"""Добро пожаловать"""
-		self.send(vid, self.answers['welcome_post_reg'], self.keyboards[keyboard_name])
+		api.send(vid, self.answers['welcome_post_reg'], self.keyboards[keyboard_name])
 
 	def answerSelectDate(self, vid, msg_id):
 		"""Выбор даты"""
 		keyboard = self.makeKeyboardSelectDate(Purposes.stud_rasp_view, msg_id + 1)
 		if not keyboard:
-			self.send(vid, self.answers['no_relevant_data'])
+			api.send(vid, self.answers['no_relevant_data'])
 		else:
-			self.send(vid, self.answers['pick_day'], kb=keyboard)
+			api.send(vid, self.answers['pick_day'], kb=keyboard)
+
+	def answerShowSchedule(self, vid, msg_id, gid, date):
+		"""Показ расписания"""
+		# Ищем расписание в кэше
+		photo_id = database.cmdGetCachedSchedule(gid, date)
+		if not photo_id:
+			# Кэша нет, создаём
+			api.edit(vid, msg_id, self.getRandomWaitText())
+			pairs = database.cmdGetPairsForGroup(gid, date)
+			self.asyncs.append()
+			self.asyncs[-1].start()
+		else:
+			api.edit(vid, msg_id, None, None, 'photo'+self.config['public_id']+'_'+photo_id)
+		pass
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, e):
@@ -234,7 +234,7 @@ class Bot:
 		if data['type'] == PayloadTypes.select_date:
 			# Выбрана дата.. но для чего?
 			if data['purpose'] == Purposes.stud_rasp_view:
-				self.edit(vid, data['msg_id'], "Текст изменён!")
+				self.answerShowSchedule(vid, data['msg_id'], user['gid'], data['date'])
 				return False
 
 	def run(self):
@@ -276,17 +276,6 @@ class Bot:
 						# Необходимо сохранение данных
 						database.cmdSaveUser(user)
 
-def vkAuth(args):
-	"""Возвращает объект vk_api.vk (для работы с api)"""
-	tflag_index = args.index("-t")
-	try:
-		bot_token = args[tflag_index + 1]
-	except IndexError:
-		# Не указан токен после -t
-		print2("Не указан токен после параметра -t", 'red')
-		sys.exit(1)
-	return vk_api.VkApi(token=bot_token)
-
 def main(args):
 	"""Входная точка программы"""
 	# Проверяем аргументы
@@ -298,7 +287,7 @@ def main(args):
 	database.start()
 
 	# Авторизация ВКонтакте
-	session = vkAuth(args)
+	session = api.start(args)
 
 	# Инициализация бота
 	bot = Bot(session)
