@@ -30,6 +30,10 @@ def start():
 		"type INTEGER DEFAULT 0,"
 		"question_progress INTEGER DEFAULT 1,"
 		"allows_mail INTEGER DEFAULT 0,"
+		"gid INTEGER,"
+		"journal_login TEXT,"
+		"journal_password TEXT,"
+		"teacher_id INTEGER,"
 		"PRIMARY KEY('id'))"
 	)
 
@@ -48,27 +52,51 @@ def start():
 		"PRIMARY KEY('id'))"
 	)
 
-	# Таблица pairs
-	# gid - id группы для этой пары
-	# day - день пары
-	# time - время пары
-	# sort - переменная для сортировки
-	# name - название пары
-	# cab - кабинет пары
-	# teacher_id - id преподавателя, ведующего эту пару
-	# label - более читаемая дата
+	# Таблица schedules - расписания занятий
+	# gid - id группы расписания
+	# day - день расписания
+	# photo_id - id фото вконтакте для этого расписания
+	# human_date - удобная дата
 	cur.execute(
-		"CREATE TABLE IF NOT EXISTS pairs("
+		"CREATE TABLE IF NOT EXISTS schedules("
 		"id INTEGER,"
 		"gid INTEGER,"
 		"day DATE,"
+		"photo_id INTEGER DEFAULT NULL,"
+		"human_date TEXT,"
+		"PRIMARY KEY('id'))"
+	)
+
+	# Таблица pairs
+	# schedule_id - id расписания для пары
+	# time - время пары
+	# sort - переменная для сортировки
+	# places - удобные места пары
+	# name - название пары
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS pairs("
+		"id INTEGER,"
+		"schedule_id INTEGER,"
 		"time DATETIME,"
 		"sort INTEGER,"
+		"places TEXT,"
 		"name TEXT,"
-		"cab INTEGER,"
+		"PRIMARY KEY('id'),"
+		"FOREIGN KEY('schedule_id') REFERENCES 'schedules'('id') ON DELETE CASCADE)"
+	)
+
+	# Таблица pair_places
+	# pair_id - id пары
+	# teacher_id - id преподавателя, ведущего пару
+	# place - место пары
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS pair_places("
+		"id INTEGER,"
+		"pair_id INTEGER,"
 		"teacher_id INTEGER,"
-		"label TEXT,"
-		"PRIMARY KEY('id'))"
+		"place TEXT,"
+		"PRIMARY KEY('id'),"
+		"FOREIGN KEY('pair_id') REFERENCES 'pairs'('id') ON DELETE CASCADE)"
 	)
 
 	# Таблица teachers
@@ -77,18 +105,6 @@ def start():
 		"CREATE TABLE IF NOT EXISTS teachers("
 		"id INTEGER,"
 		"surname TEXT,"
-		"PRIMARY KEY('id'))"
-	)
-
-	# Таблица pair_cache - кэширование изображений расписаний пар
-	# gid - id группы
-	# date - дата расписания
-	cur.execute(
-		"CREATE TABLE IF NOT EXISTS pair_cache("
-		"id INTEGER,"
-		"gid INTEGER,"
-		"date DATE,"
-		"photo_id TEXT,"
 		"PRIMARY KEY('id'))"
 	)
 
@@ -132,15 +148,7 @@ def cmdGetGidFromString(name):
 	else:
 		return response['id']
 
-def cmdAddScheduleRecord(gid, date, time, sort, name, cab, teacher_id, label):
-	"""Добавляет запись о паре в таблицу pairs"""
-	cur.execute(
-		"INSERT INTO pairs (gid, day, time, sort, name, cab, teacher_id, label) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-		(gid, date, time, sort, name, cab, teacher_id, label)
-	)
-	db.commit()
-
-def cmdGetTeacherId(name):
+def getTeacherId(name):
 	"""Возвращает id преподавателя"""
 	response = cur.execute("SELECT id FROM teachers WHERE surname = ?", (name,)).fetchone()
 	if not response:
@@ -156,13 +164,46 @@ def cmdGetDates():
 	else:
 		return response
 
-def cmdGetCachedSchedule(gid, date):
-	"""Возвращает id кэшированного расписания если есть. Если нет, возвращает False"""
-	response = cur.execute("SELECT photo_id FROM pair_cache WHERE gid=? AND date=?", (gid, date))
-
-def cmdGetPairs(gid, date):
+def getPairs(gid, date):
 	"""Возвращает пары группы на заданную дату"""
-	response = cur.execute("SELECT time, name, teachers.surname, cab FROM pairs LEFT JOIN teachers ON pairs.teacher_id=teachers.id WHERE gid=? AND day=? ORDER BY sort", (gid, date))
+	response = cur.execute(
+		"SELECT time, name, places FROM pairs"
+		"LEFT JOIN schedules ON pairs.schedule_id = schedules.id"
+		"WHERE schedules.gid=? AND schedules.day=?"
+		"ORDER BY pairs.sort",
+		(gid, date)
+	).fetchall()
+	return response
+
+def getScheduleId(gid, date):
+	"""Возвращает id расписания на основании группы и даты"""
+	response = cur.execute("SELECT id FROM schedules WHERE gid=? AND day=?", (gid, date)).fetchone()
+	if not response:
+		return False
+	else:
+		return response['id']
+
+def addSchedule(gid, date, short_date):
+	"""Добавляет запись расписания. Возвращает id добавленной записи"""
+	cur.execute("INSERT INTO schedules (gid, day, human_date) VALUES(?, ?, ?)", (gid, date, short_date))
+	db.commit()
+	return cur.lastrowid
+
+def addPair(schedule_id, time, sort, name):
+	"""Добавляет запись пары"""
+	cur.execute("INSERT INTO pairs (schedule_id, time, sort, name) VALUES(?, ?, ?, ?)", (schedule_id, time, sort, name))
+	db.commit()
+	return cur.lastrowid
+
+def addPairPlace(pair_id, teacher_id, place):
+	"""Добавляем место паре"""
+	cur.execute("INSERT INTO pair_places (pair_id, teacher_id, place) VALUES(?, ?, ?)", (pair_id, teacher_id, place))
+	db.commit()
+
+def updatePairPlacesText(pair_id, places):
+	"""Обновляет places у пары"""
+	cur.execute("UPDATE pairs SET places=? WHERE id=?", (places, pair_id))
+	db.commit()
 
 if __name__ == "__main__":
 	start()
