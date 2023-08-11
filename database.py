@@ -168,8 +168,8 @@ def cmdGetDates():
 	else:
 		return response
 
-def getPairs(gid, date):
-	"""Возвращает пары группы на заданную дату"""
+def getPairsForGroup(gid, date):
+	"""Возвращает пары для группы на заданную дату"""
 	response = cur.execute(
 		"SELECT time, name, places FROM pairs"
 		"LEFT JOIN schedules ON pairs.schedule_id = schedules.id"
@@ -201,7 +201,7 @@ def getIfCanCleanSchedule(schedule_id):
 def cleanSchedule(schedule_id):
 	"""Очищает расписание, затем запрещает его очищать до тех пор пока can_clean не станет 1"""
 	cur.execute("DELETE FROM pairs WHERE schedule_id=?", (schedule_id,))
-	cur.execute("UPDATE schedules SET can_clean=0")
+	cur.execute("UPDATE schedules SET can_clean=0 WHERE schedule_id=?", (schedule_id, ))
 	db.commit()
 
 def addPair(schedule_id, time, sort, name):
