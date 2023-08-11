@@ -21,6 +21,12 @@ def start():
 	# state - состояние пользователя
 	# admin - администратор ли
 	# type - тип пользователя (0 - неопределено, 1 - студент, 2 - преподаватель)
+	# question_progress - прогресс вопросов
+	# allows_mail - разрешена ли рассылка
+	# gid - id группы преподавателя/студента
+	# journal_login - логин в ЭЖ
+	# joirnal_password - пароль в ЭЖ
+	# teacher_id - id учителя
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS users("
 		"id INTEGER,"
@@ -41,14 +47,14 @@ def start():
 	# course - номер курса
 	# spec - специальность
 	# join_year - год поступления
-	# class_teacher_vid - id вконтакте классрука
+	# class_teacher_id - id вконтакте классрука
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS groups("
 		"id INTEGER,"
 		"course INTEGER,"
 		"spec TEXT,"
 		"join_year INTEGER,"
-		"class_teacher_vid INTEGER,"
+		"class_teacher_id INTEGER,"
 		"PRIMARY KEY('id'))"
 	)
 
@@ -56,14 +62,14 @@ def start():
 	# gid - id группы расписания
 	# day - день расписания
 	# photo_id - id фото вконтакте для этого расписания
-	# human_date - удобная дата
+	# can_clean - можно ли очисить
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS schedules("
 		"id INTEGER,"
 		"gid INTEGER,"
 		"day DATE,"
 		"photo_id INTEGER DEFAULT NULL,"
-		"human_date TEXT,"
+		"can_clean INTEGER DEFAULT 0,"
 		"PRIMARY KEY('id'))"
 	)
 
@@ -71,7 +77,6 @@ def start():
 	# schedule_id - id расписания для пары
 	# time - время пары
 	# sort - переменная для сортировки
-	# places - удобные места пары
 	# name - название пары
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS pairs("
@@ -79,18 +84,17 @@ def start():
 		"schedule_id INTEGER,"
 		"time DATETIME,"
 		"sort INTEGER,"
-		"places TEXT,"
 		"name TEXT,"
 		"PRIMARY KEY('id'),"
 		"FOREIGN KEY('schedule_id') REFERENCES 'schedules'('id') ON DELETE CASCADE)"
 	)
 
-	# Таблица pair_places
+	# Таблица pairs_places
 	# pair_id - id пары
 	# teacher_id - id преподавателя, ведущего пару
 	# place - место пары
 	cur.execute(
-		"CREATE TABLE IF NOT EXISTS pair_places("
+		"CREATE TABLE IF NOT EXISTS pairs_places("
 		"id INTEGER,"
 		"pair_id INTEGER,"
 		"teacher_id INTEGER,"
@@ -183,11 +187,22 @@ def getScheduleId(gid, date):
 	else:
 		return response['id']
 
-def addSchedule(gid, date, short_date):
+def addSchedule(gid, date):
 	"""Добавляет запись расписания. Возвращает id добавленной записи"""
-	cur.execute("INSERT INTO schedules (gid, day, human_date) VALUES(?, ?, ?)", (gid, date, short_date))
+	cur.execute("INSERT INTO schedules (gid, day) VALUES(?, ?)", (gid, date))
 	db.commit()
 	return cur.lastrowid
+
+def getIfCanCleanSchedule(schedule_id):
+	"""Возвращает true если расписание можно очисить"""
+	response = cur.execute("SELECT can_clean FROM schedules WHERE id=?", (schedule_id,)).fetchone()
+	return response['can_clean']
+
+def cleanSchedule(schedule_id):
+	"""Очищает расписание, затем запрещает его очищать до тех пор пока can_clean не станет 1"""
+	cur.execute("DELETE FROM pairs WHERE schedule_id=?", (schedule_id,))
+	cur.execute("UPDATE schedules SET can_clean=0")
+	db.commit()
 
 def addPair(schedule_id, time, sort, name):
 	"""Добавляет запись пары"""
@@ -197,12 +212,12 @@ def addPair(schedule_id, time, sort, name):
 
 def addPairPlace(pair_id, teacher_id, place):
 	"""Добавляем место паре"""
-	cur.execute("INSERT INTO pair_places (pair_id, teacher_id, place) VALUES(?, ?, ?)", (pair_id, teacher_id, place))
+	cur.execute("INSERT INTO pairs_places (pair_id, teacher_id, place) VALUES(?, ?, ?)", (pair_id, teacher_id, place))
 	db.commit()
 
-def updatePairPlacesText(pair_id, places):
-	"""Обновляет places у пары"""
-	cur.execute("UPDATE pairs SET places=? WHERE id=?", (places, pair_id))
+def makeSchedulesCleanable():
+	"""Позволяет всем расписаниям очиститься"""
+	cur.execute("UPDATE schedules SET can_clean=1")
 	db.commit()
 
 if __name__ == "__main__":

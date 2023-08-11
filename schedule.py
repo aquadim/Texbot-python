@@ -136,16 +136,13 @@ def parseDocument(__dir__):
 
 					# Узнаём id расписания для этой пары
 					schedule_id = database.getScheduleId(current_groups_row[x // 2], table_dates[table_index])
-					if not schedule_id: # Этого расписания ещё не было создано. Создаём!
-						# Короткая дата расписания
-						if table_dates[table_index] == date_today:
-							label = "Сегодня"
-						elif table_dates[table_index] == date_tomorrow:
-							label = "Завтра"
-						else:
-							label = getDateName(table_dates[table_index])
-
-						schedule_id = database.addSchedule(current_groups_row[x // 2], table_dates[table_index], label)
+					if not schedule_id:
+						# Этого расписания ещё не было создано. Создаём!
+						schedule_id = database.addSchedule(current_groups_row[x // 2], table_dates[table_index])
+					else:
+						# Это расписание уже существует. Очищаем все его пары если можно
+						if database.getIfCanCleanSchedule(schedule_id):
+							database.cleanSchedule(schedule_id)
 
 					# Добавляем пару
 					pair_id = database.addPair(schedule_id, data[y][x], y, data[y][x+1])
@@ -153,25 +150,17 @@ def parseDocument(__dir__):
 					# К паре добавляем места пары
 					# Место пары может быть в двух местах, в таких случаях места разделяются слэшем
 					places_data = data[y+1][x+1].split('/')
-					places_text = ''
 					for index, place in enumerate(places_data):
 						components = place.split(' ')
 						if len(components) == 2:
 							# Есть и кабинет и преподаватель
 							database.addPairPlace(pair_id, database.getTeacherId(components[0]), components[1])
-							places_text += components[0] + ' ' + components[1]
 						else:
 							# Есть только преподаватель
 							database.addPairPlace(pair_id, database.getTeacherId(components[0]), None)
-							places_text += components[0]
-
-						if index < len(places_data) - 1:
-							places_text += ' / '
-
-					# Обновляем текст мест у пары
-					database.updatePairPlacesText(pair_id, places_text)
 				y += 2
 		print2(f'Таблица #{table_index} готова!', 'green')
+	database.makeSchedulesCleanable()
 
 def updateSchedule(__dir__, redownload):
 	"""Загружает расписание, обновляет его в БД"""
