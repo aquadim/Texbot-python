@@ -60,15 +60,7 @@ def getDateList(word_doc, now):
 
 			if words[3] == gen_weekdays_num_to_str[guessed_weekday].lower():
 				# Совпадает! Значит высока вероятность того, что год угадан правильно
-				# Если дата актуальна, тогда ещё и добавляем в output
 				remains = (guessed_date - now).total_seconds()
-				# ~ if remains > 345600:
-					# ~ return output
-
-				# ~ if -86400 < remains:
-					# ~ output.append([day, month, now.year + i])
-				# ~ else:
-					# ~ output.append(False)
 				output.append(f'{now.year + i}-{month}-{day}')
 				break
 
