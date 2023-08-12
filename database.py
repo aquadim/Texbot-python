@@ -10,8 +10,9 @@ def dict_factory(cursor, row):
         d[col[0]] = row[idx]
     return d
 
-db = sql.connect("db.sqlite3")
+db = sql.connect("db.sqlite3", isolation_level=None, timeout=10, check_same_thread=False)
 db.row_factory = dict_factory
+db.execute("PRAGMA journal_mode=WAL")
 cur = db.cursor()
 
 def start():
@@ -133,11 +134,11 @@ def cmdGetGroupsByCourse(num):
 	response = cur.execute(f"SELECT id, spec FROM groups WHERE course=?", (num,)).fetchall()
 	return response
 
-def cmdSaveUser(user):
+def saveUserData(user):
 	"""Сохраняет все данные пользователя"""
 	cur.execute(
-		"UPDATE users SET state=?, type=?, question_progress=?",
-		(user['state'], user['type'], user['question_progress']))
+		"UPDATE users SET state=?, type=?, question_progress=?, allows_mail=?, gid=?, journal_login=?, journal_password=?, teacher_id=?",
+		(user['state'], user['type'], user['question_progress'], user['allows_mail'], user['gid'], user['journal_login'], user['journal_password'], user['teacher_id']))
 	db.commit()
 
 def cmdGetGidFromString(name):
@@ -160,24 +161,54 @@ def getTeacherId(name):
 	else:
 		return response['id']
 
-def cmdGetDates():
-	"""Возвращает даты которые есть в pairs"""
-	response = cur.execute("SELECT DISTINCT day, label FROM pairs").fetchall()
+def getScheduleDatesByGid(gid):
+	"""Возвращает актуальные даты расписаний для данной группы"""
+	response = cur.execute(
+		"SELECT id, day FROM schedules WHERE day BETWEEN date('now') AND date('now', '+3 days') AND gid=?",
+		(gid,)
+	).fetchall()
 	if not response:
 		return False
 	else:
 		return response
 
-def getPairsForGroup(gid, date):
+def getPairsForGroup(schedule_id):
 	"""Возвращает пары для группы на заданную дату"""
 	response = cur.execute(
-		"SELECT time, name, places FROM pairs"
-		"LEFT JOIN schedules ON pairs.schedule_id = schedules.id"
-		"WHERE schedules.gid=? AND schedules.day=?"
-		"ORDER BY pairs.sort",
-		(gid, date)
+		"SELECT pairs.id FROM pairs"
+		" LEFT JOIN schedules ON pairs.schedule_id = schedules.id"
+		" WHERE schedules.id=?"
+		" ORDER BY pairs.sort",
+		(schedule_id,)
 	).fetchall()
 	return response
+
+def getPairsData(pairs):
+	"""Получает данные для пар"""
+	output = []
+	for pair in pairs:
+		# Основные данные
+		response_pair = cur.execute("SELECT name, time FROM pairs WHERE id=?", (pair['id'],)).fetchone()
+
+		# Данные мест
+		places = ''
+		response_places = cur.execute(
+			"SELECT pairs_places.place, teachers.surname FROM pairs_places"
+			" LEFT JOIN teachers ON pairs_places.teacher_id=teachers.id"
+			" WHERE pair_id=?",
+			(pair['id'],)
+		).fetchall()
+		for index, place in enumerate(response_places):
+			places += place['surname']
+
+			if place['place']:
+				places += ' в ' + place['place']
+
+			if index < len(response_places) - 1:
+				places += ' / '
+
+		output.append((response_pair['time'], response_pair['name'], places))
+	return output
 
 def getScheduleId(gid, date):
 	"""Возвращает id расписания на основании группы и даты"""
@@ -190,7 +221,6 @@ def getScheduleId(gid, date):
 def addSchedule(gid, date):
 	"""Добавляет запись расписания. Возвращает id добавленной записи"""
 	cur.execute("INSERT INTO schedules (gid, day) VALUES(?, ?)", (gid, date))
-	db.commit()
 	return cur.lastrowid
 
 def getIfCanCleanSchedule(schedule_id):
@@ -201,23 +231,38 @@ def getIfCanCleanSchedule(schedule_id):
 def cleanSchedule(schedule_id):
 	"""Очищает расписание, затем запрещает его очищать до тех пор пока can_clean не станет 1"""
 	cur.execute("DELETE FROM pairs WHERE schedule_id=?", (schedule_id,))
-	cur.execute("UPDATE schedules SET can_clean=0 WHERE schedule_id=?", (schedule_id, ))
-	db.commit()
+	cur.execute("UPDATE schedules SET can_clean=0, photo_id=NULL WHERE id=?", (schedule_id, ))
 
 def addPair(schedule_id, time, sort, name):
 	"""Добавляет запись пары"""
 	cur.execute("INSERT INTO pairs (schedule_id, time, sort, name) VALUES(?, ?, ?, ?)", (schedule_id, time, sort, name))
-	db.commit()
 	return cur.lastrowid
 
 def addPairPlace(pair_id, teacher_id, place):
 	"""Добавляем место паре"""
 	cur.execute("INSERT INTO pairs_places (pair_id, teacher_id, place) VALUES(?, ?, ?)", (pair_id, teacher_id, place))
-	db.commit()
 
 def makeSchedulesCleanable():
 	"""Позволяет всем расписаниям очиститься"""
 	cur.execute("UPDATE schedules SET can_clean=1")
+	db.commit()
+
+def getScheduleData(schedule_id):
+	"""Возвращает кэшированное photo_id, дату расписания и группу"""
+	response = cur.execute("SELECT photo_id, day, gid FROM schedules WHERE id=?", (schedule_id,)).fetchone()
+	if not response:
+		return False
+	else:
+		return response
+
+def getGroupName(gid):
+	"""Возвращает название группы по gid"""
+	response = cur.execute("SELECT course, spec FROM groups WHERE id=?", (gid,)).fetchone()
+	return str(response['course']) + ' ' + response['spec']
+
+def addCacheToSchedule(schedule_id, photo_id):
+	"""Добавляет photo_id к расписанию"""
+	cur.execute("UPDATE schedules SET photo_id=? WHERE id=?", (photo_id, schedule_id))
 	db.commit()
 
 if __name__ == "__main__":

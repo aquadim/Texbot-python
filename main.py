@@ -9,6 +9,7 @@ import sys
 import random
 import os
 import json
+import graphics
 from utils import *
 
 class States:
@@ -31,6 +32,7 @@ class Bot:
 	def __init__(self, session):
 		"""Инициализация"""
 		self.dir = os.path.dirname(__file__)
+		self.tasks = []
 
 		# Загрузка ответов
 		with open(self.dir + "/config/answers.json", 'r', encoding='utf-8') as f:
@@ -46,14 +48,24 @@ class Bot:
 		with open(self.dir + "/config/config.json", 'r', encoding='utf-8') as f:
 			self.config = json.load(f)
 
-		# Кэширование
-		self.cached_images = {}
+		# Загрузка тем
+		with open(self.dir + '/config/themes.json', 'r', encoding='utf-8') as f:
+			self.themes = json.load(f)
 
 		# ВКонтакте
 		self.longpoll = VkLongPoll(session)
 
 	def getRandomWaitText(self):
-		return self.texts['wait'+str(random.randint(0,6))]
+		return self.answers['wait'+str(random.randint(0,7))]
+
+	def completeTask(self, thread):
+		"""Очищает завершившиеся асинхронные процессы"""
+		if type(thread) == graphics.ScheduleGenerator:
+			# Сохраняем photo_id для сгенерированного расписания
+			if thread.successful:
+				database.addCacheToSchedule(thread.schedule_id, thread.photo_id)
+
+		self.tasks.remove(thread)
 
 	# ГЕНЕРАТОРЫ КЛАВИАТУР
 	def makeKeyboardSelectGroup(self, data, purpose):
@@ -72,19 +84,18 @@ class Bot:
 
 		return kb.get_keyboard()
 
-	def makeKeyboardSelectDate(self, purpose, msg_id):
-		"""Возвращает разметку клавиатры для выбора даты на основании данных в таблице pairs"""
-		dates = database.cmdGetDates()
+	def makeKeyboardSelectDate(self, purpose, msg_id, gid):
+		"""Возвращает разметку клавиатры для выбора даты расписания"""
+		dates = database.getScheduleDatesByGid(gid)
 		if not dates:
 			return False
 
 		kb = VkKeyboard(inline=True)
-		message_id = random.randint(0, 10000000)
 		button_payload = {'type': PayloadTypes.select_date, 'purpose': purpose, 'msg_id': msg_id}
 
 		for index, item in enumerate(dates):
-			button_payload['date'] = item['day']
-			kb.add_button(item['label'], payload=button_payload)
+			button_payload['schedule_id'] = item['id']
+			kb.add_button(getDateName(item['day']), payload=button_payload)
 			if index != len(dates) - 1:
 				kb.add_line()
 		return kb.get_keyboard()
@@ -129,27 +140,53 @@ class Bot:
 		"""Добро пожаловать"""
 		api.send(vid, self.answers['welcome_post_reg'], self.keyboards[keyboard_name])
 
-	def answerSelectDate(self, vid, msg_id):
+	def answerSelectDate(self, vid, msg_id, gid):
 		"""Выбор даты"""
-		keyboard = self.makeKeyboardSelectDate(Purposes.stud_rasp_view, msg_id + 1)
+		keyboard = self.makeKeyboardSelectDate(Purposes.stud_rasp_view, msg_id + 1, gid)
 		if not keyboard:
 			api.send(vid, self.answers['no_relevant_data'])
 		else:
 			api.send(vid, self.answers['pick_day'], kb=keyboard)
 
-	def answerShowSchedule(self, vid, msg_id, gid, date):
+	def answerShowSchedule(self, vid, msg_id, schedule_id):
 		"""Показ расписания"""
-		# Ищем расписание в кэше
-		photo_id = database.cmdGetCachedSchedule(gid, date)
-		if not photo_id:
-			# Кэша нет, создаём
-			api.edit(vid, msg_id, self.getRandomWaitText())
-			pairs = database.cmdGetPairsForGroup(gid, date)
-			self.asyncs.append()
-			self.asyncs[-1].start()
+		response = database.getScheduleData(schedule_id)
+
+		# Расписание кэшировано?
+		if response['photo_id']:
+			api.edit(vid, msg_id, None, None, 'photo'+str(self.config['public_id'])+'_'+str(response['photo_id']))
 		else:
-			api.edit(vid, msg_id, None, None, 'photo'+self.config['public_id']+'_'+photo_id)
-		pass
+			# Прикол для Виталия :P
+			if vid == 240088163:
+				api.send(vid, self.getRandomWaitText())
+
+			# Нет кэшированного изображения, делаем
+			api.edit(vid, msg_id, self.getRandomWaitText())
+
+			# Получаем пары расписания
+			result = database.getPairsForGroup(schedule_id)
+			pairs = database.getPairsData(result)
+
+			# Получаем название группы расписания
+			group_name = database.getGroupName(response['gid'])
+
+			# Получаем читаемую дату расписания
+			schedule_date = getDateName(response['day'])
+
+			# Запускаем процесс генерации
+			self.tasks.append(graphics.ScheduleGenerator(
+				self.themes['rasp'],
+				vid,
+				msg_id,
+				self.config['public_id'],
+				pairs,
+				schedule_id,
+				group_name,
+				schedule_date,
+				self,
+				False
+			))
+			self.tasks[-1].start()
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, e):
@@ -160,7 +197,7 @@ class Bot:
 		if user['state'] == States.hub:
 			# Выбор функции бота
 			if text == 'Расписание':
-				self.answerSelectDate(vid, e.message_id)
+				self.answerSelectDate(vid, e.message_id, user['gid'])
 				return False
 
 		if user['state'] == States.void:
@@ -223,6 +260,7 @@ class Bot:
 			return False
 
 		if data['type'] == PayloadTypes.select_group:
+			print(data)
 			# Выбрана группа.. но для чего?
 			if data['purpose'] == Purposes.registration:
 				user['gid'] = data['gid']
@@ -234,7 +272,7 @@ class Bot:
 		if data['type'] == PayloadTypes.select_date:
 			# Выбрана дата.. но для чего?
 			if data['purpose'] == Purposes.stud_rasp_view:
-				self.answerShowSchedule(vid, data['msg_id'], user['gid'], data['date'])
+				self.answerShowSchedule(vid, data['msg_id'], data['schedule_id'])
 				return False
 
 	def run(self):
@@ -274,7 +312,7 @@ class Bot:
 
 					if need_update:
 						# Необходимо сохранение данных
-						database.cmdSaveUser(user)
+						database.saveUserData(user)
 
 def main(args):
 	"""Входная точка программы"""
@@ -294,7 +332,11 @@ def main(args):
 
 	# Цикл работы бота
 	while(True):
-		bot.run()
+		try:
+			bot.run()
+		except KeyboardInterrupt:
+			print2('\nПока!', 'green')
+			sys.exit(0)
 
 if __name__ == "__main__":
 	main(sys.argv)

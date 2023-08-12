@@ -4,6 +4,7 @@
 from utils import *
 import vk_api
 import requests
+import json
 
 def start(args):
 	"""Авторизуется во ВКонтакте"""
@@ -19,8 +20,11 @@ def start(args):
 
 	# Авторизуемся
 	global API
+	global PHOTOUPLOAD_URL
+
 	session = vk_api.VkApi(token=bot_token)
 	API = session.get_api()
+	PHOTOUPLOAD_URL = API.photos.getMessagesUploadServer()["upload_url"]
 
 	return session
 
@@ -30,7 +34,7 @@ def send(vid, msg, kb = None, attach = None):
 		user_id = vid,
 		message = msg,
 		keyboard = kb,
-		attachments = attach,
+		attachment = attach,
 		random_id = 0
 	)
 
@@ -40,7 +44,7 @@ def edit(vid, msg_id, msg, kb = None, attach = None):
 		peer_id = vid,
 		message = msg,
 		keyboard = kb,
-		attachments = attach,
+		attachment = attach,
 		message_id = msg_id
 	)
 
@@ -54,8 +58,8 @@ def uploadImage(image_path):
 		return None
 
 	# Загрузка данных изображения
-	response = json.loads(requests.post(photoupload_url, files=payload).content)
+	response = json.loads(requests.post(PHOTOUPLOAD_URL, files=payload).content)
 
 	# Получение id изображения
-	return api.photos.saveMessagesPhoto(server=response["server"], photo=response["photo"], hash=response["hash"])[0]["id"]
+	return API.photos.saveMessagesPhoto(server=response["server"], photo=response["photo"], hash=response["hash"])[0]["id"]
 

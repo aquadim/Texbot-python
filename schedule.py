@@ -7,6 +7,7 @@ import subprocess
 import datetime
 import database
 import sys
+import time
 from docx import Document
 from utils import *
 
@@ -61,7 +62,7 @@ def getDateList(word_doc, now):
 			if words[3] == gen_weekdays_num_to_str[guessed_weekday].lower():
 				# Совпадает! Значит высока вероятность того, что год угадан правильно
 				remains = (guessed_date - now).total_seconds()
-				output.append(f'{now.year + i}-{month}-{day}')
+				output.append(f'{now.year + i}-{dd(month)}-{dd(day)}')
 				break
 
 	return output
@@ -69,14 +70,7 @@ def getDateList(word_doc, now):
 def parseDocument(__dir__):
 	"""Парсит документ"""
 	now	= datetime.datetime.now()
-	date_today = str(now.year) + '-' + str(now.month) + '-' + str(now.day)
-
-	tomorrow = now + datetime.timedelta(days=1)
-	date_tomorrow = str(tomorrow.year) + '-' + str(tomorrow.month) + '-' + str(tomorrow.day)
-
-	# TODO:
-	# Если есть расписание на сегодня и учебный день ещё не закончился, то необходимо сохранить это расписание,
-	# потому что иногда расписание на сегодня удаляют уже.. сегодня
+	start_time = time.time()
 
 	word_doc = Document(__dir__+"/tmp/schedule.docx")
 	table_amount = len(word_doc.tables)
@@ -153,6 +147,10 @@ def parseDocument(__dir__):
 				y += 2
 		print2(f'Таблица #{table_index} готова!', 'green')
 	database.makeSchedulesCleanable()
+	database.db.commit()
+
+	end_time = time.time()
+	print(f'Время работы скрипта: {end_time - start_time}')
 
 def updateSchedule(__dir__, redownload):
 	"""Загружает расписание, обновляет его в БД"""
