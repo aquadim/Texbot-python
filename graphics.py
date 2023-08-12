@@ -2,12 +2,15 @@
 # Модуль для работы с графикой
 
 import api
-import json
-import requests
 import threading
 import os
 import random
 from PIL import Image, ImageDraw, ImageFont
+
+# Для оценок
+import requests
+import datetime
+from bs4 import BeautifulSoup
 
 __dir__ = os.path.dirname(__file__)
 FONT_CONTENT = ImageFont.truetype(__dir__ + '/fonts/OpenSans-Regular.ttf', 20)
@@ -50,8 +53,9 @@ class TableGenerator(threading.Thread):
 	def run(self):
 		"""Старт процесса"""
 		# Генерация изображения
-		image = self.generateImage()
-		if not image:
+		try:
+			image = self.generateImage()
+		except:
 			self.successful = False
 			self.onFinish()
 			return
@@ -103,12 +107,82 @@ class ScheduleGenerator(TableGenerator):
 		table = makeTableImage(
 			self.pairs,
 			[0, 40, 25],
+			table_title,
+			35,
 			False,
 			self.theme
 		)
-		# ~ output = graphicsTools.addTitle(table, table_title, colorscheme_name)
 		return table
 
+class GradesGenerator(TableGenerator):
+	"""Класс для асинхронной генерации изображений таблиц оценок"""
+	def __init__(self, theme, vid, msg_id, public_id, parent, login, password):
+		super().__init__(vid, theme, parent, public_id)
+		self.msg_id = msg_id
+		self.login = login
+		self.password = password
+
+	def generateImage(self):
+		# Авторизация в ЭЖ
+		s = requests.Session()
+		s.post(
+			"http://avers.vpmt.ru:8081/region_pou/region.cgi/login",
+			data={'username':self.login, 'userpass': self.password}
+		)
+
+		# Смотрим какие есть period_id
+		r = s.get('http://avers.vpmt.ru:8081/region_pou/region.cgi/journal_och?page=1&clear=1')
+		soup = BeautifulSoup(str(r.content, 'windows-1251'), 'lxml')
+		options = soup.find('select', attrs = {'name': 'PERIODLIST'}).findAll('option', recursive=False)
+
+		# Выбираем нужный period_id
+		now = datetime.datetime.now()
+		if 9 <= now.month <= 12:
+			# Начало учебного года, выбираем второй элемент
+			period_id = options[1]['value']
+		else:
+			# Конец учебного года, выбираем третий элемент
+			period_id = options[2]['value']
+
+		# Запрашиваем оценки
+		r = s.get('http://avers.vpmt.ru:8081/region_pou/region.cgi/journal_och?page=1&marks=1&period_id='+period_id)
+		soup = BeautifulSoup(str(r.content, 'windows-1251'), 'lxml')
+
+		# Парсим
+		output = [('Дисциплина', 'Оценки', 'Средний балл')]
+		rows = soup.find('table').findAll('tr')
+
+		# ~ a = BeautifulSoup('<html><table><tr><td class="header">Дисциплина</td><td class="header">оценки - III семестр</td><td class="header">III семестр</td></tr>, <tr><td class="header">Русский язык и культура речи</td><td>4      5          4                                    5           5 5                               4 5          5            5             5           </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.73)&amp;nbsp<span style="color: blue;">1</span></td></tr>, <tr><td class="header">Физическая культура</td><td>        Н         3                 3                    3     3          4                                      3                         3   4   4    </td><td class="header" style="text-align: right;"><b></b>&amp;nbsp(3.33)&amp;nbsp<span style="color: blue;">12</span></td></tr>, <tr><td class="header">Иностранный язык</td><td>                  5      5           4         5           5            5        5   5          5          5                        5           5      5   </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.92)&amp;nbsp<span style="color: blue;">2</span></td></tr>, <tr><td class="header">Основы алгоритмизации и программирования</td><td>    4 4      Н Н 5  4               5            5      5          5                                                                                    </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.63)&amp;nbsp<span style="color: blue;">3</span></td></tr>, <tr><td class="header">Введение в специальность</td><td>                            5          5                            4    4   5                5  4          5                        5                 </td><td class="header" style="text-align: right;"><b></b>&amp;nbsp(4.67)&amp;nbsp<span style="color: blue;">6</span></td></tr>, <tr><td class="header">Элементы высшей математики</td><td> 5 5       Н Н          5                          4              4              3             4          5                        3       5              </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.25)&amp;nbsp<span style="color: blue;">3</span></td></tr>, <tr><td class="header">Архитектура аппаратных средств</td><td>                      5       5          4      4                       5   5                     4          5 5              5                         </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.70)&amp;nbsp<span style="color: blue;">2</span></td></tr>, <tr><td class="header">МДК 02.01 Технология разработки программного обеспечения</td><td>   3                  5    4               5 5                        4              4                                                               </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.29)&amp;nbsp<span style="color: blue;">4</span></td></tr>, <tr><td class="header">МДК 02.02 Инструментальные средства разработки программного обеспечения</td><td>       Н       5     5             5 5   4 4      4        5     5 5    5               5 5         5                                                        </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.79)&amp;nbsp<span style="color: blue;">1</span></td></tr>, <tr><td class="header">УП.02.01 Ознакомительная</td><td>                                                                                5 5 5 5 5 5                                                         </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(5.00)&amp;nbsp<span style="color: blue;">1</span></td></tr>, <tr><td class="header">Операционные системы и среды</td><td>                          5     5                  4                                            5      5     4           5              5       5    5 5 </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.82)&amp;nbsp<span style="color: blue;">3</span></td></tr>, <tr><td class="header">МДК 06.03 Устройство и функционирование информационной системы</td><td>                       5    4                    5   5   4         4          5                  5    5      5     5     4              5      5    3   5     </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.63)&amp;nbsp<span style="color: blue;">3</span></td></tr>, <tr><td class="header">МДК 02.03 Математическое моделирование</td><td>                                                                                                               5 5 5 5  5   5 5   5   5 5               </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(5.00)&amp;nbsp<span style="color: blue;">1</span></td></tr></table></html>', 'lxml')
+		# ~ rows = a.find('table').findAll('tr')
+
+		for y in range(1, len(rows)):
+			cells = rows[y].findAll('td')
+
+			# Название дисциплины
+			name = cells[0].get_text()
+
+			# Оценки (может быть написать через regex?)
+			grades = cells[1].get_text().replace(' ','').replace('Н','(Н)').replace('Б','(Б)')
+
+			if len(cells[2].contents) == 3:
+				# Семестровая оценка
+				semester = cells[2].find('b').get_text()
+				if len(semester) == 0:
+					# Нет семестровой оценки
+					semester = None
+
+				# Средний балл
+				average = cells[2].contents[1].replace('&nbsp', '').replace('(', '').replace(')', '')
+			else:
+				semester = None
+				average = None
+
+			output.append((name, grades, (semester, average)))
+
+		# Завершение сессии
+		s.get('http://avers.vpmt.ru:8081/region_pou/region.cgi/logout')
+
+		print(output)
 
 # Применяет линейный горизонтальный градиент в области box, стартовым цветом gradient[0] и конечным цветом gradient[1]
 def applyGradient(Idraw_interface, box, gradient, steps):
@@ -126,7 +200,7 @@ def applyGradient(Idraw_interface, box, gradient, steps):
 			block_color[i] = int(block_color[i] + block_color_delta[i])
 		block_x_pos += block_width
 
-def makeTableImage(data, line_size_constraints, is_for_grades, theme):
+def makeTableImage(data, line_size_constraints, table_title, table_title_line_size, is_for_grades, theme):
 	"""Создаёт поверхность таблицы из данного двумерного массива данных"""
 	width = len(data[0])
 	height = len(data)
@@ -252,50 +326,31 @@ def makeTableImage(data, line_size_constraints, is_for_grades, theme):
 			data_overlay.paste(rendered_surfaces[y][x], box=(cell_pos_x, cell_pos_y))
 			cell_pos_x += table_sizes_columns[x]
 		cell_pos_y += table_sizes_rows[y]
+	table_surface = Image.alpha_composite(table_surface, data_overlay)
 
-	return Image.alpha_composite(table_surface, data_overlay)
+	# Добавляем подпись таблицы
+	title_lines = splitLongString(table_title, table_title_line_size)
+	title_height = 0
+	title_width = 0
+	for line in title_lines:
+		size = FONT_TITLE.getbbox(line)
+		title_width = max(title_width, size[2] + theme['horizontal-padding'])
+		title_height += size[3]
+	average_title_height = title_height / len(title_lines)
+	title_height = title_height + (theme['line-spacing'] * (len(title_lines) - 1)) + (2 * theme['vertical-padding'])
+	title_surface = Image.new("RGBA", size=(title_width, title_height), color=theme['container-background'])
+	Itext_draw = ImageDraw.Draw(title_surface)
+	y_pos = 0
+	for line in title_lines:
+		Itext_draw.text(xy=(0, y_pos), text=line, fill=theme['title-color'], font=FONT_TITLE)
+		y_pos += average_title_height + theme['line-spacing']
 
-# Добавляет подпись таблице
-def addTitle(table_surface, title, colorscheme_name):
-	padding = 13
-
-	lines = splitLongString(title, 35)
-
-	# Получение размеров подписи
-	# Высота одной строки
-	title_height = font_title.getbbox(title)[2:][1]
-	# Максимальная ширина
-	max_title_width = 0
-	for l in lines:
-		max_title_width = max(max_title_width, font_title.getbbox(l)[2:][0])
-
-	title_lines_padding = 0 # Расстояние между строками
-
-	# Рендер подписи
-	text_surface = Image.new(
-		"RGBA",
-		size=(max_title_width, title_height * len(lines) + title_lines_padding * len(lines) - 1),
-		color=colorschemes[colorscheme_name]["container_bg"]
-	)
-	Itext_draw = ImageDraw.Draw(text_surface)
-	line_y = 0
-	for l in lines:
-		Itext_draw.text(
-			xy=(0, line_y),
-			text=l,
-			fill=colorschemes[colorscheme_name]["title"],
-			font=font_title
-		)
-		line_y += title_height + title_lines_padding
-
-	# Вычисление размеров выходного изображения
-	surface_width = max(max_title_width, table_surface.size[0]) + padding * 2
-	surface_height = table_surface.size[1] + text_surface.size[1] + padding * 3
-
-	# Отрисовка выходного изображения
-	output = Image.new("RGBA", size=(surface_width, surface_height), color=colorschemes[colorscheme_name]["container_bg"])
-	output.paste(table_surface, box=(padding, padding * 2 + text_surface.size[1]))
-	output.paste(text_surface, box=(padding, padding))
+	# Рисуем итоговую финальную конечную поверхность
+	output_width = max(title_width, table_width) + theme['container-padding'] * 2
+	output_height = title_height + table_height + theme['container-padding'] * 2 + theme['container-spacing']
+	output = Image.new("RGB", size=(output_width, output_height), color=theme['container-background'])
+	output.paste(title_surface, box=(theme['container-padding'], theme['container-padding']))
+	output.paste(table_surface, box=(theme['container-padding'], theme['container-padding'] + theme['container-spacing'] + title_height))
 
 	return output
 
@@ -333,3 +388,7 @@ def splitLongString(text, line_size):
 	output.append(current_line[:-1])
 
 	return output
+
+
+gg = GradesGenerator(None, None, None, None, None, 'korolevvs', '0096c85fb8f84a92e080be4893900e7c3d15e684')
+gg.generateImage()
