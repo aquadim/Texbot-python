@@ -1,0 +1,13 @@
+{
+	"rasp": {
+		"horizontal-padding": 5,
+		"vertical-padding": 5,
+		"line-spacing": 2,
+		"color": "#CCCCCC",
+		"background": [
+			"#252525",
+			"#333333"
+		],
+		"separator": "#AAAAAA"
+	}
+}
