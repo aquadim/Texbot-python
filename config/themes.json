@@ -3,11 +3,15 @@
 		"horizontal-padding": 5,
 		"vertical-padding": 5,
 		"line-spacing": 2,
-		"color": "#CCCCCC",
+		"color": "#282828",
+		"title-color": "#1E1E1E",
 		"background": [
-			"#252525",
-			"#333333"
+			"#B4B4AA",
+			"#D2D2C8"
 		],
-		"separator": "#AAAAAA"
+		"separator": "#323232",
+		"container-background": "#DCDCDC",
+		"container-padding": 10,
+		"container-spacing": 5
 	}
 }
