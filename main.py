@@ -187,25 +187,6 @@ class Bot:
 				False
 			))
 			self.tasks[-1].start()
-
-	def answerShowGrades(self, vid, user_id, msg_id):
-		"""Показ оценок"""
-		# Проверяем если пользователь уже получал оценки
-		photo_id = database.getMostRecentGradesImage(user_id)
-		if photo_id:
-			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(photo_id))
-		else:
-			api.edit(vid, msg_id, self.getRandomWaitText())
-			# Запускаем процесс сбора оценок
-			self.tasks.append(graphics.GradesGenerator(
-				self.themes['grades'],
-				vid,
-				msg_id,
-				self.config['public_id'],
-				self,
-				user['journal_login'],
-				user['journal_password']
-			))
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, e):
@@ -218,9 +199,6 @@ class Bot:
 			if text == 'Расписание':
 				self.answerSelectDate(vid, e.message_id, user['gid'])
 				return False
-			if text == 'Оценки':
-				self.answerShowGrades(vid, user['id'], e.message_id)
-				return True
 
 		if user['state'] == States.void:
 			# Заглушка
