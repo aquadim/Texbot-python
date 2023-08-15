@@ -5,7 +5,8 @@ import api
 import threading
 import os
 import random
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageColor
+from utils import *
 
 # Для оценок
 import requests
@@ -45,10 +46,10 @@ class TableGenerator(threading.Thread):
 				self.onSuccess()
 			else:
 				self.onFail()
-		except:
-			pass
-		self.parent.completeTask(self)
+		except Exception as e:
+			print2(str(e), 'red')
 
+		self.parent.completeTask(self)
 
 	def run(self):
 		"""Старт процесса"""
@@ -56,6 +57,11 @@ class TableGenerator(threading.Thread):
 		try:
 			image = self.generateImage()
 		except:
+			self.successful = False
+			self.onFinish()
+			return
+
+		if not image:
 			self.successful = False
 			self.onFinish()
 			return
@@ -69,6 +75,7 @@ class TableGenerator(threading.Thread):
 			return
 
 		self.successful = True
+		print('done!')
 		self.onFinish()
 
 class ScheduleGenerator(TableGenerator):
@@ -83,9 +90,11 @@ class ScheduleGenerator(TableGenerator):
 		self.for_teacher = for_teacher
 
 	def onSuccess(self):
+		print('on success')
 		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
 
 	def onFail(self):
+		print('on fail')
 		api.edit(self.vid, self.msg_id, 'Произошла ошибка')
 
 	def saveImage(self, image):
@@ -116,11 +125,33 @@ class ScheduleGenerator(TableGenerator):
 
 class GradesGenerator(TableGenerator):
 	"""Класс для асинхронной генерации изображений таблиц оценок"""
-	def __init__(self, theme, vid, msg_id, public_id, parent, login, password):
+	def __init__(self, theme, vid, msg_id, public_id, parent, login, password, user_id, keyboard):
 		super().__init__(vid, theme, parent, public_id)
 		self.msg_id = msg_id
 		self.login = login
 		self.password = password
+		self.user_id = user_id
+		self.keyboard = keyboard
+		self.error = 0 # Код ошибки. 0 - неизвестно, 1 - неверный логин или пароль
+
+	def onSuccess(self):
+		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
+
+	def onFail(self):
+		if self.error == 0:
+			api.edit(self.vid, self.msg_id, 'Произошла ошибка. Пожалуйста сообщите об этом администрации')
+		elif self.error == 1:
+			api.edit(
+				self.vid,
+				self.msg_id,
+				'Не удалось собрать оценки, так как неизвестны твои логин и пароль от дневника.',
+				self.keyboard
+			)
+
+	def saveImage(self, image):
+		filename = __dir__+'/tmp/grades-'+str(random.randint(0,1000000))+'.png'
+		image.save(filename)
+		return filename
 
 	def generateImage(self):
 		# Авторизация в ЭЖ
@@ -133,7 +164,12 @@ class GradesGenerator(TableGenerator):
 		# Смотрим какие есть period_id
 		r = s.get('http://avers.vpmt.ru:8081/region_pou/region.cgi/journal_och?page=1&clear=1')
 		soup = BeautifulSoup(str(r.content, 'windows-1251'), 'lxml')
-		options = soup.find('select', attrs = {'name': 'PERIODLIST'}).findAll('option', recursive=False)
+		try:
+			options = soup.find('select', attrs = {'name': 'PERIODLIST'}).findAll('option', recursive=False)
+		except AttributeError:
+			# Не найден PERIODLIST - следовательно логин и/или пароль неверны
+			self.error = 1
+			return None
 
 		# Выбираем нужный period_id
 		now = datetime.datetime.now()
@@ -149,11 +185,8 @@ class GradesGenerator(TableGenerator):
 		soup = BeautifulSoup(str(r.content, 'windows-1251'), 'lxml')
 
 		# Парсим
-		output = [('Дисциплина', 'Оценки', 'Средний балл')]
+		data = [('Дисциплина', 'Оценки', 'Средний балл')]
 		rows = soup.find('table').findAll('tr')
-
-		# ~ a = BeautifulSoup('<html><table><tr><td class="header">Дисциплина</td><td class="header">оценки - III семестр</td><td class="header">III семестр</td></tr>, <tr><td class="header">Русский язык и культура речи</td><td>4      5          4                                    5           5 5                               4 5          5            5             5           </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.73)&amp;nbsp<span style="color: blue;">1</span></td></tr>, <tr><td class="header">Физическая культура</td><td>        Н         3                 3                    3     3          4                                      3                         3   4   4    </td><td class="header" style="text-align: right;"><b></b>&amp;nbsp(3.33)&amp;nbsp<span style="color: blue;">12</span></td></tr>, <tr><td class="header">Иностранный язык</td><td>                  5      5           4         5           5            5        5   5          5          5                        5           5      5   </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.92)&amp;nbsp<span style="color: blue;">2</span></td></tr>, <tr><td class="header">Основы алгоритмизации и программирования</td><td>    4 4      Н Н 5  4               5            5      5          5                                                                                    </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.63)&amp;nbsp<span style="color: blue;">3</span></td></tr>, <tr><td class="header">Введение в специальность</td><td>                            5          5                            4    4   5                5  4          5                        5                 </td><td class="header" style="text-align: right;"><b></b>&amp;nbsp(4.67)&amp;nbsp<span style="color: blue;">6</span></td></tr>, <tr><td class="header">Элементы высшей математики</td><td> 5 5       Н Н          5                          4              4              3             4          5                        3       5              </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.25)&amp;nbsp<span style="color: blue;">3</span></td></tr>, <tr><td class="header">Архитектура аппаратных средств</td><td>                      5       5          4      4                       5   5                     4          5 5              5                         </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.70)&amp;nbsp<span style="color: blue;">2</span></td></tr>, <tr><td class="header">МДК 02.01 Технология разработки программного обеспечения</td><td>   3                  5    4               5 5                        4              4                                                               </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.29)&amp;nbsp<span style="color: blue;">4</span></td></tr>, <tr><td class="header">МДК 02.02 Инструментальные средства разработки программного обеспечения</td><td>       Н       5     5             5 5   4 4      4        5     5 5    5               5 5         5                                                        </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.79)&amp;nbsp<span style="color: blue;">1</span></td></tr>, <tr><td class="header">УП.02.01 Ознакомительная</td><td>                                                                                5 5 5 5 5 5                                                         </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(5.00)&amp;nbsp<span style="color: blue;">1</span></td></tr>, <tr><td class="header">Операционные системы и среды</td><td>                          5     5                  4                                            5      5     4           5              5       5    5 5 </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.82)&amp;nbsp<span style="color: blue;">3</span></td></tr>, <tr><td class="header">МДК 06.03 Устройство и функционирование информационной системы</td><td>                       5    4                    5   5   4         4          5                  5    5      5     5     4              5      5    3   5     </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(4.63)&amp;nbsp<span style="color: blue;">3</span></td></tr>, <tr><td class="header">МДК 02.03 Математическое моделирование</td><td>                                                                                                               5 5 5 5  5   5 5   5   5 5               </td><td class="header" style="text-align: right;"><b>5</b>&amp;nbsp(5.00)&amp;nbsp<span style="color: blue;">1</span></td></tr></table></html>', 'lxml')
-		# ~ rows = a.find('table').findAll('tr')
 
 		for y in range(1, len(rows)):
 			cells = rows[y].findAll('td')
@@ -177,27 +210,46 @@ class GradesGenerator(TableGenerator):
 				semester = None
 				average = None
 
-			output.append((name, grades, (semester, average)))
+			grades_overall = ''
+			if semester:
+				grades_overall += f'({semester}) '
+			if average:
+				grades_overall += average
+
+			data.append((name, grades, grades_overall))
 
 		# Завершение сессии
 		s.get('http://avers.vpmt.ru:8081/region_pou/region.cgi/logout')
 
-		print(output)
+		now = datetime.datetime.now()
+		table = makeTableImage(
+			data,
+			(35, 40, 0),
+			'Оценки на ' + str(now.day) + ' ' + gen_month_num_to_str[now.month] + ' ' + str(now.year) + ', ' + dd(now.hour) + ':' + dd(now.minute),
+			0,
+			True,
+			self.theme
+		)
+		return table
 
-# Применяет линейный горизонтальный градиент в области box, стартовым цветом gradient[0] и конечным цветом gradient[1]
-def applyGradient(Idraw_interface, box, gradient, steps):
+def applyGradient(Idraw_interface, box, color1, color2, steps = 20):
+	"""Применяет линейный горизонтальный градиент в области box, стартовым цветом color1 и конечным цветом color2"""
 	block_width = (box[2] - box[0]) / steps
-	block_color_delta = [(gradient[1][i] - gradient[0][i]) / steps for i in range(3)]
-	block_color = list(gradient[0])
+
+	color1 = ImageColor.getcolor(color1, "RGB")
+	color2 = ImageColor.getcolor(color2, "RGB")
+
+	block_color_delta = [(color2[i] - color1[i]) / steps for i in range(3)]
+	block_color = list(color1)
 	block_x_pos = box[0]
 
 	for step in range(steps):
 		Idraw_interface.rectangle(
 			(block_x_pos, box[1], block_x_pos + block_width, box[3]),
-			fill=tuple(block_color)
+			fill=(int(block_color[0]), int(block_color[1]), int(block_color[2]))
 		)
 		for i in range(3):
-			block_color[i] = int(block_color[i] + block_color_delta[i])
+			block_color[i] += block_color_delta[i]
 		block_x_pos += block_width
 
 def makeTableImage(data, line_size_constraints, table_title, table_title_line_size, is_for_grades, theme):
@@ -218,15 +270,15 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 			# Разбиваем текст на строки
 			lines = splitLongString(data[y][x], line_size_constraints[x])
 
-			# Вычисление размеров яйчейки
+			# Вычисление размеров текста
 			text_surface_width = 0
 			text_surface_height = 0
 			for line in lines:
 				size = FONT_CONTENT.getbbox(line)
-				text_surface_width = max(text_surface_width, size[2] + 2 * theme['horizontal-padding'])
+				text_surface_width = max(text_surface_width, size[2])
 				text_surface_height += size[3]
 			average_line_height = text_surface_height / len(lines)
-			text_surface_height = text_surface_height + (theme['line-spacing'] * (len(lines) - 1)) + (2 * theme['vertical-padding'])
+			text_surface_height = text_surface_height + (theme['line-spacing'] * (len(lines) - 1))
 
 			# Рендер текста (прозрачный фон)
 			text_surface = Image.new(
@@ -239,7 +291,7 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 			y_pos = 0
 			for index, line in enumerate(lines):
 				Itext_draw.text(
-					xy=(theme['horizontal-padding'], y_pos),
+					xy=(0, y_pos),
 					text=line,
 					fill=theme["color"],
 					font=FONT_CONTENT
@@ -248,8 +300,8 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 			rendered_surfaces[y][x] = text_surface.copy()
 
 			# Изменение ширины/высоты всей колонки/строки (если необходимо)
-			table_sizes_columns[x] = max(table_sizes_columns[x], text_surface_width)
-			table_sizes_rows[y] = max(table_sizes_rows[y], text_surface_height)
+			table_sizes_columns[x] = max(table_sizes_columns[x], text_surface_width + 2 * theme['horizontal-padding'])
+			table_sizes_rows[y] = max(table_sizes_rows[y], text_surface_height + 2 * theme['vertical-padding'])
 
 	# Создание поверхности таблицы
 	table_width = sum(table_sizes_columns)
@@ -263,38 +315,39 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 		need_gradient = False
 
 		if is_for_grades:
-			# Вычисление левого цвета строки. Слегка желтоватый если семестровая оценка
-			# уже выставлена, иначе обычный цвет
-			if data[y][2][0] == "(":
-				# Если семестровая оценка уже выставлена, строка должна быть жёлтой
-				left_color_name = "yellow_highlight"
+			# Левый цвет
+			if len(data[y][2]) > 0 and data[y][2][0] == '(':
+				# Семестровая оценка выставлена
+				color1 = theme['yellow'][y % 2]
+				need_gradient = True
 			else:
-				left_color_name = "row_bg"
+				color1 = theme['background'][y % 2]
 
-			# Вычисление правого цвета строки. Красный если предмет в строке имеет двойки
-			# Фиолетовый если предмет в строке имеет ТОЛЬКО пятёрки
-			if data[y][1].find("2") != -1:
-				# Если в оценках за этот семестр существует двойка, подсветить строку красным.
-				right_color_name = "red_highlight"
+			# Правый цвет
+			if data[y][1].find('2') != -1:
+				# Обнаружена двойка
+				color2 = theme['red'][y % 2]
+				need_gradient = True
 			elif y != 0 and len(data[y][1]) > 0 and data[y][1].find("2") == -1 and data[y][1].find("3") == -1 and data[y][1].find("4") == -1:
-				# Если все полученные оценки - это пятёрки, то подсветить строку ~градиентом~
-				right_color_name = "perfect_highlight"
+				# Только пятёрки
+				color2 = theme['purple'][y % 2]
+				need_gradient = True
 			else:
-				# Обычный задний фон
-				need_gradient = False
+				color2 = theme['background'][y % 2]
 		else:
-			color1 = theme["background"]
+			color1 = theme["background"][y % 2]
 
 		# Задний фон
 		if need_gradient:
 			applyGradient(
 				Itable_draw,
-				(table_sizes_columns[0], y_pos, table_width, y_pos + table_sizes_rows[y]),
-				(colorschemes[colorscheme_name][left_color_name][y%2], colorschemes[colorscheme_name][right_color_name][y%2]),
-				50
+				(0, y_pos, table_width, y_pos + table_sizes_rows[y]),
+				color1,
+				color2,
+				40
 			)
 		else:
-			Itable_draw.rectangle((0, y_pos, table_width, y_pos + table_sizes_rows[y]), fill=color1[y % 2])
+			Itable_draw.rectangle((0, y_pos, table_width, y_pos + table_sizes_rows[y]), fill=color1)
 
 		y_pos += table_sizes_rows[y]
 
@@ -323,7 +376,7 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 	for y in range(height):
 		cell_pos_x = 0
 		for x in range(width):
-			data_overlay.paste(rendered_surfaces[y][x], box=(cell_pos_x, cell_pos_y))
+			data_overlay.paste(rendered_surfaces[y][x], box=(cell_pos_x + theme['horizontal-padding'], cell_pos_y + theme['vertical-padding']))
 			cell_pos_x += table_sizes_columns[x]
 		cell_pos_y += table_sizes_rows[y]
 	table_surface = Image.alpha_composite(table_surface, data_overlay)
@@ -334,10 +387,10 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 	title_width = 0
 	for line in title_lines:
 		size = FONT_TITLE.getbbox(line)
-		title_width = max(title_width, size[2] + theme['horizontal-padding'])
+		title_width = max(title_width, size[2])
 		title_height += size[3]
 	average_title_height = title_height / len(title_lines)
-	title_height = title_height + (theme['line-spacing'] * (len(title_lines) - 1)) + (2 * theme['vertical-padding'])
+	title_height = title_height + (theme['line-spacing'] * (len(title_lines) - 1))
 	title_surface = Image.new("RGBA", size=(title_width, title_height), color=theme['container-background'])
 	Itext_draw = ImageDraw.Draw(title_surface)
 	y_pos = 0
@@ -389,6 +442,9 @@ def splitLongString(text, line_size):
 
 	return output
 
-import sys
-gg = GradesGenerator(None, None, None, None, None, sys.argv[1], sys.argv[2])
-gg.generateImage()
+# ~ import sys,json
+# ~ with open('config/themes.json', 'r', encoding='utf-8') as f:
+	# ~ themes = json.load(f)
+# ~ gg = GradesGenerator(themes['grades'], None, None, None, None, 'korolevvs', '_0096c85fb8f84a92e080be4893900e7c3d15e684')
+# ~ a = gg.generateImage()
+# ~ a.save('h.png')

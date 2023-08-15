@@ -10,6 +10,7 @@ import random
 import os
 import json
 import graphics
+import hashlib
 from utils import *
 
 class States:
@@ -18,11 +19,14 @@ class States:
 	void			= 2
 	reg_can_send	= 3
 	hub				= 4
+	enter_login		= 5
+	enter_password	= 6
 
 class PayloadTypes:
-	select_group= 0		# Выбор группы
-	show_terms	= 1		# Показать условия использования
-	select_date = 2		# Выбор даты
+	select_group		= 0	# Выбор группы
+	show_terms			= 1	# Показать условия использования
+	select_date 		= 2	# Выбор даты
+	enter_credentials	= 3	# Ввод данных журнала
 
 class Purposes:
 	registration	= 0 # Для регистрации
@@ -65,7 +69,20 @@ class Bot:
 			if thread.successful:
 				database.addCacheToSchedule(thread.schedule_id, thread.photo_id)
 
+		elif type(thread) == graphics.GradesGenerator:
+			if thread.successful:
+				database.addGradesRecord(thread.user_id, thread.photo_id)
+
 		self.tasks.remove(thread)
+
+	def checkIfCancelled(self, text, user):
+		"""Проверяет если пользователь запросил отмену. Если да - то возвращаем его в хаб"""
+		if text == 'Отмена':
+			user['state'] = States.hub
+			self.answerToHub(user['vk_id'], user['type'])
+			return True
+		else:
+			return False
 
 	# ГЕНЕРАТОРЫ КЛАВИАТУР
 	def makeKeyboardSelectGroup(self, data, purpose):
@@ -120,8 +137,9 @@ class Bot:
 		"""Вопрос: На каком ты курсе?"""
 		api.send(vid, self.answers['question_what_is_your_course'].format(progress), self.keyboards['course_nums'])
 
-	def answerAskStudentGroup(self, vid, progress, group_names):
+	def answerAskStudentGroup(self, vid, progress, course):
 		"""Вопрос: Какая из этих групп твоя?"""
+		available_names = database.cmdGetGroupsByCourse(course)
 		api.send(
 			vid,
 			self.answers['question_what_is_your_group'].format(progress),
@@ -142,7 +160,7 @@ class Bot:
 
 	def answerSelectDate(self, vid, msg_id, gid):
 		"""Выбор даты"""
-		keyboard = self.makeKeyboardSelectDate(Purposes.stud_rasp_view, msg_id + 1, gid)
+		keyboard = self.makeKeyboardSelectDate(Purposes.stud_rasp_view, msg_id, gid)
 		if not keyboard:
 			api.send(vid, self.answers['no_relevant_data'])
 		else:
@@ -188,14 +206,14 @@ class Bot:
 			))
 			self.tasks[-1].start()
 
-	def answerShowGrades(self, vid, user_id, msg_id):
+	def answerShowGrades(self, vid, user_id, msg_id, login, password):
 		"""Показ оценок"""
 		# Проверяем если пользователь уже получал оценки
 		photo_id = database.getMostRecentGradesImage(user_id)
 		if photo_id:
 			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(photo_id))
 		else:
-			api.edit(vid, msg_id, self.getRandomWaitText())
+			api.send(vid, self.getRandomWaitText())
 			# Запускаем процесс сбора оценок
 			self.tasks.append(graphics.GradesGenerator(
 				self.themes['grades'],
@@ -203,9 +221,29 @@ class Bot:
 				msg_id,
 				self.config['public_id'],
 				self,
-				user['journal_login'],
-				user['journal_password']
+				login,
+				password,
+				user_id,
+				self.keyboards['enter_journal_credentials']
 			))
+			self.tasks[-1].start()
+
+	def answerAskJournalLogin(self, vid):
+		"""Спрашиваем логин журнала"""
+		api.send(vid, self.answers['enter_login'], self.keyboards['cancel'])
+
+	def answerAskJournalPassword(self, vid):
+		"""Спрашиваем пароль журнала"""
+		api.send(vid, self.answers['enter_password'], self.keyboards['cancel'])
+
+	def answerDone(self, vid):
+		"""Ответ: Готово!"""
+		api.send(vid, self.answers['done'])
+
+	def answerToHub(self, vid, user_type):
+		"""Возвращает пользователя в хаб"""
+		if user_type == 1:
+			api.send(vid, self.answers['returning'], self.keyboards['stud_hub'])
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, e):
@@ -216,10 +254,10 @@ class Bot:
 		if user['state'] == States.hub:
 			# Выбор функции бота
 			if text == 'Расписание':
-				self.answerSelectDate(vid, e.message_id, user['gid'])
+				self.answerSelectDate(vid, e.message_id + 1, user['gid'])
 				return False
 			if text == 'Оценки':
-				self.answerShowGrades(vid, user['id'], e.message_id)
+				self.answerShowGrades(vid, user['id'], e.message_id + 1, user['journal_login'], user['journal_password'])
 				return True
 
 		if user['state'] == States.void:
@@ -253,8 +291,7 @@ class Bot:
 			user['state'] = States.void
 			user['question_progress'] += 1
 
-			available_names = database.cmdGetGroupsByCourse(text)
-			self.answerAskStudentGroup(vid, user['question_progress'], available_names)
+			self.answerAskStudentGroup(vid, user['question_progress'], text)
 
 			return True
 
@@ -272,6 +309,25 @@ class Bot:
 			self.answerPostRegistration(vid, 'stud_hub')
 			return True
 
+		if user['state'] == States.enter_login:
+			# Ввод логина
+			if self.checkIfCancelled(text, user):
+				return True
+			user['journal_login'] = text
+			user['state'] = States.enter_password
+			self.answerAskJournalPassword(vid)
+			return True
+
+		if user['state'] == States.enter_password:
+			# Ввод пароля
+			if self.checkIfCancelled(text, user):
+				return True
+			user['journal_password'] = hashlib.sha1(bytes(text, "utf-8")).hexdigest()
+			user['state'] = States.hub
+			self.answerDone(vid)
+			self.answerToHub(vid, user['type'])
+			return True
+
 	def handleMessageWithPayload(self, data, user, e):
 		"""handleMessage для сообщений с доп. данными"""
 		vid = user['vk_id']
@@ -282,7 +338,6 @@ class Bot:
 			return False
 
 		if data['type'] == PayloadTypes.select_group:
-			print(data)
 			# Выбрана группа.. но для чего?
 			if data['purpose'] == Purposes.registration:
 				user['gid'] = data['gid']
@@ -296,6 +351,12 @@ class Bot:
 			if data['purpose'] == Purposes.stud_rasp_view:
 				self.answerShowSchedule(vid, data['msg_id'], data['schedule_id'])
 				return False
+
+		if data['type'] == PayloadTypes.enter_credentials:
+			# Переводим пользователя на ввод логина и пароля дневника
+			user['state'] = States.enter_login
+			self.answerAskJournalLogin(vid)
+			return True
 
 	def run(self):
 		"""Принимает и обрабатывает входящие события"""

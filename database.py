@@ -282,12 +282,17 @@ def addCacheToSchedule(schedule_id, photo_id):
 def getMostRecentGradesImage(user_id):
 	"""Возвращает самое недавнее photo_id для оценок пользователя"""
 	# -10 minute - оценки за последние 10 минут
-	# +3 hour - сдвиг временной зоны
+	# +3 hour - часовой пояс
 	response = cur.execute("SELECT photo_id FROM users_grades WHERE date_create > datetime('now', '-10 minute', '+3 hour') ORDER BY date_create DESC LIMIT 1").fetchone()
 	if not response:
 		return False
 	else:
 		return response['photo_id']
+
+def addGradesRecord(user_id, photo_id):
+	"""Добавляет кэшированное фото оценок"""
+	cur.execute("INSERT INTO users_grades (user_id, date_create, photo_id) VALUES(?, DATETIME('now', '+3 hour'), ?)", (user_id, photo_id))
+	db.commit()
 
 if __name__ == "__main__":
 	start()
