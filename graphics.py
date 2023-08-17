@@ -75,7 +75,6 @@ class TableGenerator(threading.Thread):
 			return
 
 		self.successful = True
-		print('done!')
 		self.onFinish()
 
 class ScheduleGenerator(TableGenerator):
@@ -90,11 +89,9 @@ class ScheduleGenerator(TableGenerator):
 		self.for_teacher = for_teacher
 
 	def onSuccess(self):
-		print('on success')
 		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
 
 	def onFail(self):
-		print('on fail')
 		api.edit(self.vid, self.msg_id, 'Произошла ошибка')
 
 	def saveImage(self, image):
