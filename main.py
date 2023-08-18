@@ -2,7 +2,8 @@
 # Вадябот
 
 import api
-from vk_api.longpoll import VkLongPoll, VkEventType
+from vk_api.utils import get_random_id
+from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import database
 import sys
@@ -57,7 +58,7 @@ class Bot:
 			self.themes = json.load(f)
 
 		# ВКонтакте
-		self.longpoll = VkLongPoll(session)
+		self.longpoll = VkBotLongPoll(session, group_id=str(-1 * self.config['public_id']))
 
 	def getRandomWaitText(self):
 		return self.answers['wait'+str(random.randint(0,7))]
@@ -112,7 +113,7 @@ class Bot:
 
 		for index, item in enumerate(dates):
 			button_payload['schedule_id'] = item['id']
-			kb.add_button(getDateName(item['day']), payload=button_payload)
+			kb.add_callback_button(getDateName(item['day']), payload=button_payload)
 			if index != len(dates) - 1:
 				kb.add_line()
 		return kb.get_keyboard()
@@ -139,7 +140,7 @@ class Bot:
 
 	def answerAskStudentGroup(self, vid, progress, course):
 		"""Вопрос: Какая из этих групп твоя?"""
-		available_names = database.cmdGetGroupsByCourse(course)
+		group_names = database.getGroupsByCourse(course)
 		api.send(
 			vid,
 			self.answers['question_what_is_your_group'].format(progress),
@@ -168,7 +169,7 @@ class Bot:
 
 	def answerShowSchedule(self, vid, msg_id, schedule_id):
 		"""Показ расписания"""
-		response = database.getScheduleData(schedule_id)
+		response = database.getScheduleDataForGroup(schedule_id)
 
 		# Расписание кэшировано?
 		if response['photo_id']:
@@ -182,8 +183,7 @@ class Bot:
 			api.edit(vid, msg_id, self.getRandomWaitText())
 
 			# Получаем пары расписания
-			result = database.getPairsForGroup(schedule_id)
-			pairs = database.getPairsData(result)
+			pairs = database.getPairsForGroup(schedule_id)
 
 			# Получаем название группы расписания
 			group_name = database.getGroupName(response['gid'])
@@ -244,9 +244,31 @@ class Bot:
 		"""Возвращает пользователя в хаб"""
 		if user_type == 1:
 			api.send(vid, self.answers['returning'], self.keyboards['stud_hub'])
+
+	def answerWhatsNext(self, vid, gid):
+		"""Отвечает какая пара следующая"""
+		response = database.getNextPairForGroup(gid)
+
+		if not response:
+			api.send(vid, self.answers['get-next-fail'])
+			return
+
+		print(response)
+
+		# Оставшееся время
+		hours_left = response['dt'] * 24
+		minutes_left = (hours_left - int(hours_left)) * 60
+
+		api.send(vid, self.answers['get-next-student'].format(
+			str(round(hours_left)) + ' ' + formatHoursGen(round(hours_left)),
+			str(round(minutes_left)) + ' ' + formatMinutesGen(round(minutes_left)),
+			response['pair_name'],
+			response['pair_place'],
+			response['pair_time']
+		))
 	# КОНЕЦ ОТВЕТОВ БОТА
 
-	def handleMessage(self, text, user, e):
+	def handleMessage(self, text, user, message_id):
 		"""Принимает сообщение, обрабатывает, отвечает и сохраняет результат. Возвращает true, если данные пользователя
 		нужно обновить"""
 		vid = user['vk_id']
@@ -254,11 +276,14 @@ class Bot:
 		if user['state'] == States.hub:
 			# Выбор функции бота
 			if text == 'Расписание':
-				self.answerSelectDate(vid, e.message_id + 1, user['gid'])
+				self.answerSelectDate(vid, message_id + 1, user['gid'])
 				return False
 			if text == 'Оценки':
-				self.answerShowGrades(vid, user['id'], e.message_id + 1, user['journal_login'], user['journal_password'])
-				return True
+				self.answerShowGrades(vid, user['id'], message_id + 1, user['journal_login'], user['journal_password'])
+				return False
+			if text == 'Что дальше?':
+				self.answerWhatsNext(vid, user['gid'])
+				return False
 
 		if user['state'] == States.void:
 			# Заглушка
@@ -328,7 +353,7 @@ class Bot:
 			self.answerToHub(vid, user['type'])
 			return True
 
-	def handleMessageWithPayload(self, data, user, e):
+	def handleMessageWithPayload(self, data, user):
 		"""handleMessage для сообщений с доп. данными"""
 		vid = user['vk_id']
 
@@ -363,39 +388,45 @@ class Bot:
 		print2("Бот онлайн", 'green')
 
 		for event in self.longpoll.listen():
-			if event.type == VkEventType.MESSAGE_NEW and event.to_me:
-				# Получено входящее сообщение
+			if event.type == VkBotEventType.MESSAGE_NEW:
+				# Новое текстовое сообщение
+				text = event.obj.message['text']		# Текст сообщения
+				vid = event.obj.message['peer_id']		# ID отправившего
+				message_id = event.obj.message['id']	# ID сообщения
+				from_group = message_id == 0			# Из группы ли?
 
-				# Определение типа сообщения
-				if "payload" in event.__dict__:
-					# С доп. данными
-					message_data = json.loads(event.payload)
-					has_payload = True
-				else:
-					# Обычное
-					has_payload = False
+				if len(text) == 0:
+					continue
 
-				# Получаем необходимые данные
-				vid = event.user_id
-				text = event.text
-				user = database.cmdGetUserInfo(vid)
+				if from_group:
+					# Пока что мы не будем обрабатывать сообщения из бесед
+					continue
 
+				user = database.getUserInfo(vid)
 				print('user: ', user)
 
 				if not user:
 					# Первый запуск
 					self.answerOnMeet(vid)
-					database.cmdCreateUser(vid)
+					database.createUser(vid)
 				else:
 					# Не первый запуск
-					if has_payload:
-						need_update = self.handleMessageWithPayload(message_data, user, event)
+					if 'payload' in event.obj.message:
+						message_data = json.loads(event.obj.message['payload'])
+						need_update = self.handleMessageWithPayload(message_data, user)
 					else:
-						need_update = self.handleMessage(text, user, event)
+						need_update = self.handleMessage(text, user, message_id)
 
 					if need_update:
 						# Необходимо сохранение данных
 						database.saveUserData(user)
+
+			if event.type == VkBotEventType.MESSAGE_EVENT:
+				# Новое событие
+				vid = event.obj.peer_id
+				message_data = event.obj.payload
+				user = database.getUserInfo(vid)
+				need_update = self.handleMessageWithPayload(message_data, user)
 
 def main(args):
 	"""Входная точка программы"""
@@ -419,6 +450,7 @@ def main(args):
 			bot.run()
 		except KeyboardInterrupt:
 			print2('\nПока!', 'green')
+			database.stop()
 			sys.exit(0)
 
 if __name__ == "__main__":

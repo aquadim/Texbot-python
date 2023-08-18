@@ -129,7 +129,12 @@ def start():
 
 	db.commit()
 
-def cmdGetUserInfo(uid):
+def stop():
+	"""Чисто закрывает соединение с БД"""
+	db.close()
+
+# Пользователи
+def getUserInfo(uid):
 	"""Возвращает информацию о пользователе в словаре из таблицы users"""
 	response = cur.execute(
 		"SELECT * FROM users WHERE vk_id=?",
@@ -138,15 +143,10 @@ def cmdGetUserInfo(uid):
 
 	return response
 
-def cmdCreateUser(vid):
+def createUser(vid):
 	"""Создаёт пользователя"""
 	cur.execute(f"INSERT INTO users (vk_id, state) VALUES (?, 0)", (vid,))
 	db.commit()
-
-def cmdGetGroupsByCourse(num):
-	"""Выбирает все группы по заданному курсу"""
-	response = cur.execute(f"SELECT id, spec FROM groups WHERE course=?", (num,)).fetchall()
-	return response
 
 def saveUserData(user):
 	"""Сохраняет все данные пользователя"""
@@ -154,6 +154,12 @@ def saveUserData(user):
 		"UPDATE users SET state=?, type=?, question_progress=?, allows_mail=?, gid=?, journal_login=?, journal_password=?, teacher_id=?",
 		(user['state'], user['type'], user['question_progress'], user['allows_mail'], user['gid'], user['journal_login'], user['journal_password'], user['teacher_id']))
 	db.commit()
+
+# Группы
+def getGroupsByCourse(num):
+	"""Выбирает все группы по заданному курсу"""
+	response = cur.execute(f"SELECT id, spec FROM groups WHERE course=?", (num,)).fetchall()
+	return response
 
 def cmdGetGidFromString(name):
 	"""Возвращает id группы с названием name. Формат name: <Номер курса> <специальность>"""
@@ -167,6 +173,12 @@ def cmdGetGidFromString(name):
 	else:
 		return response['id']
 
+def getGroupName(gid):
+	"""Возвращает название группы по gid"""
+	response = cur.execute("SELECT course, spec FROM groups WHERE id=?", (gid,)).fetchone()
+	return str(response['course']) + ' ' + response['spec']
+
+# Преподаватели
 def getTeacherId(name):
 	"""Возвращает id преподавателя"""
 	response = cur.execute("SELECT id FROM teachers WHERE surname = ?", (name,)).fetchone()
@@ -175,12 +187,21 @@ def getTeacherId(name):
 	else:
 		return response['id']
 
+# Функция: Расписание (для студента)
 def getScheduleDatesByGid(gid):
 	"""Возвращает актуальные даты расписаний для данной группы"""
 	response = cur.execute(
-		"SELECT id, day FROM schedules WHERE day BETWEEN date('now') AND date('now', '+3 days') AND gid=?",
+		"SELECT id, day FROM schedules WHERE day < date('now', '+3 days') AND gid=?",
 		(gid,)
 	).fetchall()
+	if not response:
+		return False
+	else:
+		return response
+
+def getScheduleDataForGroup(schedule_id):
+	"""Возвращает кэшированное photo_id, дату расписания и группу"""
+	response = cur.execute("SELECT photo_id, day, gid FROM schedules WHERE id=?", (schedule_id,)).fetchone()
 	if not response:
 		return False
 	else:
@@ -189,41 +210,61 @@ def getScheduleDatesByGid(gid):
 def getPairsForGroup(schedule_id):
 	"""Возвращает пары для группы на заданную дату"""
 	response = cur.execute(
-		"SELECT pairs.id FROM pairs"
-		" LEFT JOIN schedules ON pairs.schedule_id = schedules.id"
-		" WHERE schedules.id=?"
-		" ORDER BY pairs.sort",
+		"SELECT pairs.time as pair_time, pairs.name as pair_name, group_concat(teachers.surname || ' ' || pairs_places.place, '/') as pair_place FROM pairs "
+		"LEFT JOIN schedules ON pairs.schedule_id = schedules.id "
+		"LEFT JOIN pairs_places ON pairs.id = pairs_places.pair_id "
+		"LEFT JOIN teachers ON teachers.id = pairs_places.teacher_id "
+		"WHERE schedules.id=? "
+		"GROUP BY pairs.id "
+		"ORDER BY pairs.sort ",
 		(schedule_id,)
 	).fetchall()
-	return response
+	pairs = []
+	for row in response:
+		pairs.append((row['pair_time'], row['pair_name'], row['pair_place']))
+	return pairs
 
-def getPairsData(pairs):
-	"""Получает данные для пар"""
-	output = []
-	for pair in pairs:
-		# Основные данные
-		response_pair = cur.execute("SELECT name, time FROM pairs WHERE id=?", (pair['id'],)).fetchone()
+# Функция: Оценки
+def getMostRecentGradesImage(user_id):
+	"""Возвращает самое недавнее photo_id для оценок пользователя"""
+	# -10 minute - оценки за последние 10 минут
+	response = cur.execute("SELECT photo_id FROM users_grades WHERE date_create > datetime('now', 'localtime', '-10 minute') ORDER BY date_create DESC LIMIT 1").fetchone()
+	if not response:
+		return False
+	else:
+		return response['photo_id']
 
-		# Данные мест
-		places = ''
-		response_places = cur.execute(
-			"SELECT pairs_places.place, teachers.surname FROM pairs_places"
-			" LEFT JOIN teachers ON pairs_places.teacher_id=teachers.id"
-			" WHERE pair_id=?",
-			(pair['id'],)
-		).fetchall()
-		for index, place in enumerate(response_places):
-			places += place['surname']
+def addGradesRecord(user_id, photo_id):
+	"""Добавляет кэшированное фото оценок"""
+	cur.execute("INSERT INTO users_grades (user_id, date_create, photo_id) VALUES(?, DATETIME('now', 'localtime'), ?)", (user_id, photo_id))
+	db.commit()
 
-			if place['place']:
-				places += ' в ' + place['place']
+# Функция: Что дальше?
+def getNextPairForGroup(gid):
+	"""Возвращает следующую пару для группы и оставшееся до неё время в днях"""
+	response = cur.execute(
+		"SELECT "
+			"pairs.time AS pair_time, "
+			"pairs.name AS pair_name, "
+			"group_concat(teachers.surname || ' ' || pairs_places.place, '/') AS pair_place, "
+			"julianday(schedules.day, pairs.time) - julianday('now', 'localtime') AS dt "
+		"FROM schedules "
+			"LEFT JOIN pairs ON pairs.schedule_id = schedules.id "
+			"LEFT JOIN pairs_places ON pairs.id = pairs_places.pair_id "
+			"LEFT JOIN teachers ON teachers.id = pairs_places.teacher_id "
+		"WHERE gid=? AND datetime(schedules.day, pairs.time) > datetime('now', 'localtime') "
+		"GROUP BY pairs.id "
+		"ORDER BY schedules.day ASC, pairs.time ASC "
+		"LIMIT 1 ",
+		(gid,)
+	).fetchone()
 
-			if index < len(response_places) - 1:
-				places += ' / '
+	if not response:
+		return False
+	else:
+		return response
 
-		output.append((response_pair['time'], response_pair['name'], places))
-	return output
-
+# Парсинг расписания
 def getScheduleId(gid, date):
 	"""Возвращает id расписания на основании группы и даты"""
 	response = cur.execute("SELECT id FROM schedules WHERE gid=? AND day=?", (gid, date)).fetchone()
@@ -261,38 +302,31 @@ def makeSchedulesCleanable():
 	cur.execute("UPDATE schedules SET can_clean=1")
 	db.commit()
 
-def getScheduleData(schedule_id):
-	"""Возвращает кэшированное photo_id, дату расписания и группу"""
-	response = cur.execute("SELECT photo_id, day, gid FROM schedules WHERE id=?", (schedule_id,)).fetchone()
-	if not response:
-		return False
-	else:
-		return response
-
-def getGroupName(gid):
-	"""Возвращает название группы по gid"""
-	response = cur.execute("SELECT course, spec FROM groups WHERE id=?", (gid,)).fetchone()
-	return str(response['course']) + ' ' + response['spec']
-
 def addCacheToSchedule(schedule_id, photo_id):
 	"""Добавляет photo_id к расписанию"""
 	cur.execute("UPDATE schedules SET photo_id=? WHERE id=?", (photo_id, schedule_id))
 	db.commit()
 
-def getMostRecentGradesImage(user_id):
-	"""Возвращает самое недавнее photo_id для оценок пользователя"""
-	# -10 minute - оценки за последние 10 минут
-	# +3 hour - часовой пояс
-	response = cur.execute("SELECT photo_id FROM users_grades WHERE date_create > datetime('now', '-10 minute', '+3 hour') ORDER BY date_create DESC LIMIT 1").fetchone()
-	if not response:
-		return False
-	else:
-		return response['photo_id']
 
-def addGradesRecord(user_id, photo_id):
-	"""Добавляет кэшированное фото оценок"""
-	cur.execute("INSERT INTO users_grades (user_id, date_create, photo_id) VALUES(?, DATETIME('now', '+3 hour'), ?)", (user_id, photo_id))
-	db.commit()
+def getPairInfo(pair_id, get_teachers_by_id):
+	"""Возвращает информацию о паре в формате: (time, name, ((teacher_id, place), (teacher_id, place), (...)))"""
+	response_main = cur.execute("SELECT time, name FROM pairs WHERE id=?", (pair_id,)).fetchone()
+
+	# Получаем данные проведении
+	# ~ if get_teachers_by_id:
+		# ~ places_query = "SELECT teacher_id as t, place as p FROM pairs_places WHERE pair_id=?"
+	# ~ else:
+		# ~ places_query =
+			# ~ "SELECT teachers_surname as t, pairs_places.place "
+			# ~ "FROM pairs_places LEFT JOIN teachers ON pairs_places.teacher_id=teachers.id"
+			# ~ "WHERE pairs_places.pair_id=?"
+	# ~ response_places = cur.execute(places_query, (pair_id,)).fetchall()
+
+	# Собираем вывод
+	output_places = []
+	for row in response_places:
+		output_places.append((row['t'], row['p']))
+	return (response_main['time'], response_main['name'], tuple(output_places))
 
 if __name__ == "__main__":
 	start()

@@ -31,7 +31,7 @@ def start(args):
 def send(vid, msg, kb = None, attach = None):
 	"""Отправляет сообщение пользователю"""
 	API.messages.send(
-		user_id = vid,
+		peer_id = vid,
 		message = msg,
 		keyboard = kb,
 		attachment = attach,

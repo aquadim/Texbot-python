@@ -130,8 +130,12 @@ def parseDocument(__dir__):
 						if database.getIfCanCleanSchedule(schedule_id):
 							database.cleanSchedule(schedule_id)
 
+					# Время пары
+					pair_time = data[y][x].split(':')
+					pair_time = dd(int(pair_time[0])) + ':' + dd(int(pair_time[1]))
+
 					# Добавляем пару
-					pair_id = database.addPair(schedule_id, data[y][x], y, data[y][x+1])
+					pair_id = database.addPair(schedule_id, pair_time, y, data[y][x+1])
 
 					# К паре добавляем места пары
 					# Место пары может быть в двух местах, в таких случаях места разделяются слэшем
