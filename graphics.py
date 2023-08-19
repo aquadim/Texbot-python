@@ -44,17 +44,17 @@ class TableGenerator(threading.Thread):
 		pass
 
 	def onFail(self):
-		"""Вызывается в случае провала"""
+		"""Вызывается в случае неизвестного провала"""
 		pass
 
 	def onFinish(self, status):
 		"""Вызывается в конце"""
 		try:
-			self.successful = status
-			if status == True:
+			self.successful = status == 0
+			if status == 0:
 				self.onSuccess()
 			else:
-				self.onFail()
+				self.onFail(status)
 		except Exception as e:
 			print2(str(e), 'red')
 
@@ -63,16 +63,15 @@ class TableGenerator(threading.Thread):
 	def run(self):
 		"""Старт процесса"""
 		# Генерация изображения
-		image = self.generateImage()
 		try:
-			pass
+			image = self.generateImage()
 		except Exception as e:
 			print2(str(e), 'red')
-			self.onFinish(False)
+			self.onFinish(1)
 			return
 
-		if not image:
-			self.onFinish(False)
+		if image == None:
+			self.onFinish(2)
 			return
 
 		# Загрузка на сервера ВКонтакте
@@ -80,30 +79,30 @@ class TableGenerator(threading.Thread):
 		self.photo_id = api.uploadImage(filename)
 		if not self.photo_id:
 			self.successful = False
-			self.onFinish(False)
+			self.onFinish(1)
 			return
 
-		self.onFinish(True)
+		self.onFinish(0)
 
 class ScheduleGenerator(TableGenerator):
 	"""Класс для асинхронной генерации изображений таблиц расписания"""
 	def __init__(self, vid, public_id, theme, parent, name, msg_id, date):
-	# ~ def __init__(self, vid, public_id, theme, parent, name, msg_id, data, date):
 		super().__init__(vid, public_id, theme, parent, name)
 		self.msg_id = msg_id
-		# ~ self.data = data
 		self.date = date
 
 	def onSuccess(self):
 		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
 
-	def onFail(self):
-		api.edit(self.vid, self.msg_id, 'Произошла ошибка')
+	def onFail(self, status):
+		if status == 1:
+			api.edit(self.vid, self.msg_id, 'Произошла неизвестная ошибка')
+		elif status == 2:
+			api.edit(self.vid, self.msg_id, '(Нет данных)')
 
 class TeacherScheduleGenerator(ScheduleGenerator):
 	"""Класс для асинхронной генерации изображений таблиц расписания преподавателей"""
 	def __init__(self, vid, public_id, theme, parent, name, msg_id, date, teacher_id):
-	# ~ def __init__(self, vid, public_id, theme, parent, name, msg_id, data, date, teacher_id):
 		super().__init__(vid, public_id, theme, parent, name, msg_id, date)
 		self.teacher_id = teacher_id
 
@@ -117,6 +116,27 @@ class TeacherScheduleGenerator(ScheduleGenerator):
 			data,
 			(0, 40, 25, 0),
 			f"Расписание преподавателя {database.getTeacherSurname(self.teacher_id)} на {getDateName(self.date)}",
+			35,
+			False,
+			self.theme
+		)
+
+class GroupScheduleGenerator(ScheduleGenerator):
+	"""Класс для асинхронной генерации изображений таблиц расписания групп"""
+	def __init__(self, vid, public_id, theme, parent, name, msg_id, date, gid):
+		super().__init__(vid, public_id, theme, parent, name, msg_id, date)
+		self.gid = gid
+
+	def generateImage(self):
+		self.schedule_id = database.getScheduleId(self.gid, self.date)
+		data = database.getPairsForGroup(self.schedule_id)
+		if not data:
+			return None
+		data.insert(0, ("Время", "Дисциплина", "Место проведения"))
+		return makeTableImage(
+			data,
+			(0, 40, 25),
+			f"Расписание группы {database.getGroupName(self.gid)} на {getDateName(self.date)}",
 			35,
 			False,
 			self.theme

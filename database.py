@@ -214,9 +214,9 @@ def getScheduleDatesByGid(gid):
 	else:
 		return response
 
-def getScheduleDataForGroup(schedule_id):
-	"""Возвращает кэшированное photo_id, дату расписания и группу"""
-	response = cur.execute("SELECT photo_id, day, gid FROM schedules WHERE id=?", (schedule_id,)).fetchone()
+def getScheduleDataForGroup(date, gid):
+	"""Возвращает кэшированное photo_id, расписания"""
+	response = cur.execute("SELECT photo_id FROM schedules WHERE day=? AND gid=?", (date,gid)).fetchone()
 	if not response:
 		return False
 	else:
@@ -247,7 +247,7 @@ def getAllTeachers():
 
 def getRelevantScheduleDates():
 	"""Возвращает актуальные даты расписания"""
-	response = cur.execute("SELECT DISTINCT day FROM schedules WHERE day < date('now', '+3 days')").fetchall()
+	response = cur.execute("SELECT DISTINCT day FROM schedules WHERE day BETWEEN date('now') and date('now', '+3 days')").fetchall()
 	if not response:
 		return False
 	else:

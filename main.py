@@ -68,9 +68,10 @@ class Bot:
 
 	def completeTask(self, thread):
 		"""Очищает завершившиеся асинхронные процессы"""
-		if type(thread) == graphics.ScheduleGenerator:
-			# Сохраняем photo_id для сгенерированного расписания
-			database.addCacheToSchedule(thread.schedule_id, thread.photo_id)
+		if type(thread) == graphics.GroupScheduleGenerator:
+			if thread.successful:
+				# Сохраняем photo_id для сгенерированного расписания
+				database.addCacheToSchedule(thread.schedule_id, thread.photo_id)
 
 		elif type(thread) == graphics.TeacherScheduleGenerator:
 			if thread.successful:
@@ -108,27 +109,7 @@ class Bot:
 
 		return kb.get_keyboard()
 
-	def makeKeyboardSelectDateForGroup(self, purpose, msg_id, gid):
-		"""Возвращает разметку клавиатуры для выбора даты расписания у группы"""
-		dates = database.getScheduleDatesByGid(gid)
-		if not dates:
-			return False
-
-		kb = VkKeyboard(inline=True)
-		button_payload = {
-			'type': PayloadTypes.select_date,
-			'purpose': purpose,
-			'msg_id': msg_id
-		}
-
-		for index, item in enumerate(dates):
-			button_payload['schedule_id'] = item['id']
-			kb.add_callback_button(getDateName(item['day']), payload=button_payload)
-			if index != len(dates) - 1:
-				kb.add_line()
-		return kb.get_keyboard()
-
-	def makeKeyboardSelectDateForTeacher(self, purpose, msg_id, teacher_id):
+	def makeKeyboardSelectRelevantDate(self, purpose, msg_id, target):
 		"""Возвращает клавиатуру выбора даты в которой хранится информация о выбранном преподавателе"""
 		dates = database.getRelevantScheduleDates()
 		if not dates:
@@ -139,7 +120,7 @@ class Bot:
 			'type': PayloadTypes.select_date,
 			'purpose': purpose,
 			'msg_id': msg_id,
-			'teacher_id': teacher_id
+			'target': target
 		}
 
 		for index, item in enumerate(dates):
@@ -220,18 +201,19 @@ class Bot:
 	def answerSelectDate(self, vid, msg_id, target, for_teacher):
 		"""Отсылает сообщение с выбором даты"""
 		if for_teacher:
-			keyboard = self.makeKeyboardSelectDateForTeacher(Purposes.teacher_rasp_view, msg_id, target)
+			purpose = Purposes.teacher_rasp_view
 		else:
-			keyboard = self.makeKeyboardSelectDateForGroup(Purposes.stud_rasp_view, msg_id, target)
+			purpose = Purposes.stud_rasp_view
+		keyboard = self.makeKeyboardSelectRelevantDate(purpose, msg_id, target)
 
 		if not keyboard:
 			api.send(vid, self.answers['no_relevant_data'])
 		else:
 			api.send(vid, self.answers['pick_day'], kb=keyboard)
 
-	def answerShowScheduleForGroup(self, vid, schedule_id):
+	def answerShowScheduleForGroup(self, vid, date, gid):
 		"""Показ расписания для группы"""
-		response = database.getScheduleDataForGroup(schedule_id)
+		response = database.getScheduleDataForGroup(date, gid)
 
 		# Расписание кэшировано?
 		if response['photo_id']:
@@ -244,28 +226,15 @@ class Bot:
 
 		# Нет кэшированного изображения, делаем
 		msg_id = api.send(vid, self.getRandomWaitText())
-
-		# Получаем пары расписания
-		pairs = database.getPairsForGroup(schedule_id)
-
-		# Получаем название группы расписания
-		group_name = database.getGroupName(response['gid'])
-
-		# Получаем читаемую дату расписания
-		schedule_date = getDateName(response['day'])
-
-		# Запускаем процесс генерации
-		self.tasks.append(graphics.ScheduleGenerator(
-			self.themes['rasp'],
+		self.tasks.append(graphics.GroupScheduleGenerator(
 			vid,
-			msg_id,
 			self.config['public_id'],
-			pairs,
-			schedule_id,
-			group_name,
-			schedule_date,
+			self.themes['rasp'],
 			self,
-			False
+			'group-schedule',
+			msg_id,
+			date,
+			gid
 		))
 		self.tasks[-1].start()
 
@@ -462,6 +431,17 @@ class Bot:
 		"""handleMessage для сообщений с доп. данными"""
 		vid = user['vk_id']
 
+		if data['type'] == PayloadTypes.select_date:
+			# Выбрана дата.. но для чего?
+			if data['purpose'] == Purposes.stud_rasp_view:
+				# Просмотр расписания группы
+				self.answerShowScheduleForGroup(vid, data['date'], data['target'])
+				return False
+			if data['purpose'] == Purposes.teacher_rasp_view:
+				# Просмотр расписания преподавателя
+				self.answerShowScheduleForTeacher(vid, data['msg_id'], data['date'], data['target'])
+				return False
+
 		if data['type'] == PayloadTypes.show_terms:
 			# Показ условий использования
 			self.answerShowTerms(vid)
@@ -476,15 +456,6 @@ class Bot:
 				self.answerAskIfCanSend(vid, user['question_progress'])
 				return True
 
-		if data['type'] == PayloadTypes.select_date:
-			# Выбрана дата.. но для чего?
-			if data['purpose'] == Purposes.stud_rasp_view:
-				# Просмотр расписания группы
-				self.answerShowScheduleForGroup(vid, data['schedule_id'])
-				return False
-			if data['purpose'] == Purposes.teacher_rasp_view:
-				# Просмотр расписания преподавателя
-				self.answerShowScheduleForTeacher(vid, data['msg_id'], data['date'], data['teacher_id'])
 
 		if data['type'] == PayloadTypes.enter_credentials:
 			# Переводим пользователя на ввод логина и пароля дневника
