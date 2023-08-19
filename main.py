@@ -271,10 +271,10 @@ class Bot:
 
 	def answerShowScheduleForTeacher(self, vid, msg_id, date, teacher_id):
 		"""Показ расписания для преподавателя"""
-		photo_id = database.getCachedScheduleOfTeacher(date, teacher_id)
-		if photo_id:
+		response = database.getCachedScheduleOfTeacher(date, teacher_id)
+		if response:
 			# Есть кэшированное
-			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(photo_id))
+			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(response['photo_id']))
 			return
 		msg_id = api.send(vid, self.getRandomWaitText())
 
