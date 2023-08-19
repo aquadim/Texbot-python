@@ -138,7 +138,6 @@ def start():
 		"FOREIGN KEY('teacher_id') REFERENCES 'teachers'('id') ON DELETE CASCADE ON UPDATE CASCADE)"
 	)
 
-
 	db.commit()
 
 def stop():
@@ -199,6 +198,10 @@ def getTeacherId(name):
 	else:
 		return response['id']
 
+def getTeacherSurname(teacher_id):
+	"""Возвращает фамилию преподавателя"""
+	return cur.execute("SELECT surname FROM teachers WHERE id=?", (teacher_id,)).fetchone()['surname']
+
 # Функция: Расписание (для группы)
 def getScheduleDatesByGid(gid):
 	"""Возвращает актуальные даты расписаний для данной группы"""
@@ -244,7 +247,7 @@ def getAllTeachers():
 
 def getRelevantScheduleDates():
 	"""Возвращает актуальные даты расписания"""
-	response = cur.execute("SELECT day FROM schedules WHERE day < date('now', '+3 days')")
+	response = cur.execute("SELECT DISTINCT day FROM schedules WHERE day < date('now', '+3 days')").fetchall()
 	if not response:
 		return False
 	else:
@@ -253,19 +256,32 @@ def getRelevantScheduleDates():
 def getScheduleDataForTeacher(date, teacher_id):
 	"""Возвращает данные пар для преподавателя"""
 	response = cur.execute(
-		"SELECT pairs.time as pair_time, pairs.name as pair_name, pairs_places.place as pair_place, groups.course || groups.spec as group_name"
-		"FROM pairs_places"
-			"LEFT JOIN pairs ON pairs.id = pairs_places.pair_id"
-			"LEFT JOIN schedules ON schedules.id = pairs.schedule_id"
-			"LEFT JOIN groups ON groups.id = schedules.gid"
+		"SELECT pairs.time as pair_time, pairs.name as pair_name, pairs_places.place as pair_place, groups.course || groups.spec as group_name "
+		"FROM pairs_places "
+			"LEFT JOIN pairs ON pairs.id = pairs_places.pair_id "
+			"LEFT JOIN schedules ON schedules.id = pairs.schedule_id "
+			"LEFT JOIN groups ON groups.id = schedules.gid "
 		"WHERE pairs_places.teacher_id = ? AND schedules.day=?"
 		"ORDER BY pairs.sort",
 		(teacher_id, date)
 	).fetchall()
 	if not response:
 		return False
-	else:
-		return response
+	pairs = []
+	for row in response:
+		pairs.append((row['pair_time'], row['pair_name'], row['pair_place'], row['group_name']))
+	return pairs
+
+def getCachedScheduleOfTeacher(date, teacher_id):
+	"""Возвращает кэшированное расписание преподавателя"""
+	return cur.execute(
+		"SELECT photo_id FROM teachers_schedule_cache WHERE date=? AND teacher_id=?", (date, teacher_id)
+	).fetchone()
+
+def addCachedScheduleOfTeacher(date, teacher_id, photo_id):
+	"""Добавляет кэшированное расписание преподавателя"""
+	cur.execute("INSERT INTO teachers_schedule_cache (date,teacher_id,photo_id) VALUES(?,?,?)", (date, teacher_id, photo_id))
+	db.commit()
 
 # Функция: Оценки
 def getMostRecentGradesImage(user_id):
@@ -329,6 +345,8 @@ def getIfCanCleanSchedule(schedule_id):
 def cleanSchedule(schedule_id):
 	"""Очищает расписание, затем запрещает его очищать до тех пор пока can_clean не станет 1"""
 	cur.execute("DELETE FROM pairs WHERE schedule_id=?", (schedule_id,))
+	schedule_date = cur.execute("SELECT day FROM schedules WHERE id=?", (schedule_id,)).fetchone()['day']
+	cur.execute("DELETE FROM teachers_schedule_cache WHERE date=?", (schedule_date,))
 	cur.execute("UPDATE schedules SET can_clean=0, photo_id=NULL WHERE id=?", (schedule_id, ))
 
 def addPair(schedule_id, time, sort, name):

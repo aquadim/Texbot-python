@@ -5,6 +5,7 @@ import api
 import threading
 import os
 import random
+import database
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from utils import *
 
@@ -19,17 +20,24 @@ FONT_TITLE = ImageFont.truetype(__dir__ + '/fonts/OpenSans-Regular.ttf', 30)
 
 class TableGenerator(threading.Thread):
 	"""Класс для генерации таблиц"""
-	def __init__(self, vid, theme, parent, public_id):
+	def __init__(self, vid, public_id, theme, parent, img_name):
 		super().__init__()
 		self.vid = vid
+		self.public_id = public_id
 		self.theme = theme
 		self.parent = parent
+		self.img_name = img_name
 		self.successful = False
-		self.public_id = public_id
 
 	def generateImage(self):
 		"""Метод генерации изображения"""
 		pass
+
+	def saveImage(self, image):
+		"""Сохранение изображения"""
+		filename = f'{__dir__}/tmp/{self.img_name}-'+str(random.randint(1000000,9999999))+'.png'
+		image.save(filename)
+		return filename
 
 	def onSuccess(self):
 		"""Вызывается в случае успеха"""
@@ -39,10 +47,11 @@ class TableGenerator(threading.Thread):
 		"""Вызывается в случае провала"""
 		pass
 
-	def onFinish(self):
+	def onFinish(self, status):
 		"""Вызывается в конце"""
 		try:
-			if self.successful:
+			self.successful = status
+			if status == True:
 				self.onSuccess()
 			else:
 				self.onFail()
@@ -54,16 +63,16 @@ class TableGenerator(threading.Thread):
 	def run(self):
 		"""Старт процесса"""
 		# Генерация изображения
+		image = self.generateImage()
 		try:
-			image = self.generateImage()
-		except:
-			self.successful = False
-			self.onFinish()
+			pass
+		except Exception as e:
+			print2(str(e), 'red')
+			self.onFinish(False)
 			return
 
 		if not image:
-			self.successful = False
-			self.onFinish()
+			self.onFinish(False)
 			return
 
 		# Загрузка на сервера ВКонтакте
@@ -71,22 +80,19 @@ class TableGenerator(threading.Thread):
 		self.photo_id = api.uploadImage(filename)
 		if not self.photo_id:
 			self.successful = False
-			self.onFinish()
+			self.onFinish(False)
 			return
 
-		self.successful = True
-		self.onFinish()
+		self.onFinish(True)
 
 class ScheduleGenerator(TableGenerator):
 	"""Класс для асинхронной генерации изображений таблиц расписания"""
-	def __init__(self, theme, vid, msg_id, public_id, pairs, schedule_id, target, date, parent, for_teacher=False):
-		super().__init__(vid, theme, parent, public_id)
+	def __init__(self, vid, public_id, theme, parent, name, msg_id, date):
+	# ~ def __init__(self, vid, public_id, theme, parent, name, msg_id, data, date):
+		super().__init__(vid, public_id, theme, parent, name)
 		self.msg_id = msg_id
-		self.pairs = pairs
-		self.schedule_id = schedule_id
-		self.target = target
+		# ~ self.data = data
 		self.date = date
-		self.for_teacher = for_teacher
 
 	def onSuccess(self):
 		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
@@ -94,36 +100,32 @@ class ScheduleGenerator(TableGenerator):
 	def onFail(self):
 		api.edit(self.vid, self.msg_id, 'Произошла ошибка')
 
-	def saveImage(self, image):
-		table_id = random.randint(0,1000000)
-		filename = __dir__+'/tmp/table-'+str(table_id)+'.png'
-		image.save(filename)
-		return filename
+class TeacherScheduleGenerator(ScheduleGenerator):
+	"""Класс для асинхронной генерации изображений таблиц расписания преподавателей"""
+	def __init__(self, vid, public_id, theme, parent, name, msg_id, date, teacher_id):
+	# ~ def __init__(self, vid, public_id, theme, parent, name, msg_id, data, date, teacher_id):
+		super().__init__(vid, public_id, theme, parent, name, msg_id, date)
+		self.teacher_id = teacher_id
 
 	def generateImage(self):
-		# Определение подписи таблицы, добавление названий столбцов
-		if self.for_teacher:
-			table_title = f"Расписание преподавателя {self.target} на {self.date}"
-			self.pairs.insert(0, ("Время", "Дисциплина", "Группа", "Кабинет"))
-		else:
-			table_title = f"Расписание группы {self.target} на {self.date}"
-			self.pairs.insert(0, ("Время", "Дисциплина", "Место проведения"))
-
 		# Генерация изображения и текста сообщения
-		table = makeTableImage(
-			self.pairs,
-			[0, 40, 25],
-			table_title,
+		data = database.getScheduleDataForTeacher(self.date, self.teacher_id)
+		if not data:
+			return None
+		data.insert(0, ("Время", "Дисциплина", "Место проведения", "Группа"))
+		return makeTableImage(
+			data,
+			(0, 40, 25, 0),
+			f"Расписание преподавателя {database.getTeacherSurname(self.teacher_id)} на {getDateName(self.date)}",
 			35,
 			False,
 			self.theme
 		)
-		return table
 
 class GradesGenerator(TableGenerator):
 	"""Класс для асинхронной генерации изображений таблиц оценок"""
 	def __init__(self, theme, vid, msg_id, public_id, parent, login, password, user_id, keyboard):
-		super().__init__(vid, theme, parent, public_id)
+		super().__init__(vid, public_id, theme, parent)
 		self.msg_id = msg_id
 		self.login = login
 		self.password = password
@@ -265,7 +267,10 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 	for y in range(height):
 		for x in range(width):
 			# Разбиваем текст на строки
-			lines = splitLongString(data[y][x], line_size_constraints[x])
+			if data[y][x] == None:
+				lines = ('н/д',)
+			else:
+				lines = splitLongString(data[y][x], line_size_constraints[x])
 
 			# Вычисление размеров текста
 			text_surface_width = 0
@@ -379,7 +384,10 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 	table_surface = Image.alpha_composite(table_surface, data_overlay)
 
 	# Добавляем подпись таблицы
-	title_lines = splitLongString(table_title, table_title_line_size)
+	if table_title == None:
+		table_lines = ('[Нет названия]',)
+	else:
+		title_lines = splitLongString(table_title, table_title_line_size)
 	title_height = 0
 	title_width = 0
 	for line in title_lines:

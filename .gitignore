@@ -5,5 +5,6 @@ fillData.py
 tmp/table*
 tmp/schedule*
 tmp/grades*
+tmp/*.png
 *sqlite3-shm
 *sqlite3-wal

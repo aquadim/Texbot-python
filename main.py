@@ -70,8 +70,11 @@ class Bot:
 		"""Очищает завершившиеся асинхронные процессы"""
 		if type(thread) == graphics.ScheduleGenerator:
 			# Сохраняем photo_id для сгенерированного расписания
+			database.addCacheToSchedule(thread.schedule_id, thread.photo_id)
+
+		elif type(thread) == graphics.TeacherScheduleGenerator:
 			if thread.successful:
-				database.addCacheToSchedule(thread.schedule_id, thread.photo_id)
+				database.addCachedScheduleOfTeacher(thread.date, thread.teacher_id, thread.photo_id)
 
 		elif type(thread) == graphics.GradesGenerator:
 			if thread.successful:
@@ -162,7 +165,7 @@ class Bot:
 			for y in range(i, i + 9, 3):
 				for x in range(3):
 					button_payload['teacher_id'] = teachers[y + x]['id']
-					kb.add_callback_button(teachers[y + x]['surname'], payload=button_payload)
+					kb.add_button(teachers[y + x]['surname'], payload=button_payload)
 					if x + y >= len(teachers) - 1:
 						# Преподаватели закончились
 						output.append(kb.get_keyboard())
@@ -233,41 +236,60 @@ class Bot:
 		# Расписание кэшировано?
 		if response['photo_id']:
 			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(response['photo_id']))
-		else:
-			# Прикол для Виталия :P
-			if vid == 240088163:
-				api.send(vid, self.getRandomWaitText())
+			return
 
-			# Нет кэшированного изображения, делаем
-			msg_id = api.send(vid, self.getRandomWaitText())
+		# Прикол для Виталия :P
+		if vid == 240088163:
+			api.send(vid, self.getRandomWaitText())
 
-			# Получаем пары расписания
-			pairs = database.getPairsForGroup(schedule_id)
+		# Нет кэшированного изображения, делаем
+		msg_id = api.send(vid, self.getRandomWaitText())
 
-			# Получаем название группы расписания
-			group_name = database.getGroupName(response['gid'])
+		# Получаем пары расписания
+		pairs = database.getPairsForGroup(schedule_id)
 
-			# Получаем читаемую дату расписания
-			schedule_date = getDateName(response['day'])
+		# Получаем название группы расписания
+		group_name = database.getGroupName(response['gid'])
 
-			# Запускаем процесс генерации
-			self.tasks.append(graphics.ScheduleGenerator(
-				self.themes['rasp'],
-				vid,
-				msg_id,
-				self.config['public_id'],
-				pairs,
-				schedule_id,
-				group_name,
-				schedule_date,
-				self,
-				False
-			))
-			self.tasks[-1].start()
+		# Получаем читаемую дату расписания
+		schedule_date = getDateName(response['day'])
+
+		# Запускаем процесс генерации
+		self.tasks.append(graphics.ScheduleGenerator(
+			self.themes['rasp'],
+			vid,
+			msg_id,
+			self.config['public_id'],
+			pairs,
+			schedule_id,
+			group_name,
+			schedule_date,
+			self,
+			False
+		))
+		self.tasks[-1].start()
 
 	def answerShowScheduleForTeacher(self, vid, msg_id, date, teacher_id):
 		"""Показ расписания для преподавателя"""
-		response = database.getScheduleDataForTeacher(date, teacher_id)
+		photo_id = database.getCachedScheduleOfTeacher(date, teacher_id)
+		if photo_id:
+			# Есть кэшированное
+			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(photo_id))
+			return
+		msg_id = api.send(vid, self.getRandomWaitText())
+
+		self.tasks.append(graphics.TeacherScheduleGenerator(
+			vid,
+			self.config['public_id'],
+			self.themes['rasp'],
+			self,
+			'teacher-schedule',
+			msg_id,
+			date,
+			teacher_id
+		))
+		self.tasks[-1].start()
+
 
 	def answerShowGrades(self, vid, user_id, msg_id, login, password):
 		"""Показ оценок"""
