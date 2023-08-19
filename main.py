@@ -13,6 +13,9 @@ import json
 import graphics
 import hashlib
 import math
+import logging
+import time
+from requests.exceptions import *
 from utils import *
 
 class States:
@@ -37,9 +40,9 @@ class Purposes:
 	teacher_rasp_view	= 2 # Просмотр расписания преподавателя
 
 class Bot:
-	def __init__(self, session):
+	def __init__(self, session, cwd):
 		"""Инициализация"""
-		self.dir = os.path.dirname(__file__)
+		self.dir = cwd
 		self.tasks = []
 
 		# Загрузка ответов
@@ -68,6 +71,13 @@ class Bot:
 
 	def completeTask(self, thread):
 		"""Очищает завершившиеся асинхронные процессы"""
+		if thread.has_exception:
+			try:
+				api.send(thread.vid, self.answers['exception'].format(str(thread.exception)))
+				api.tgErrorReport(str(thread.exception))
+			except:
+				pass
+
 		if type(thread) == graphics.GroupScheduleGenerator:
 			if thread.successful:
 				# Сохраняем photo_id для сгенерированного расписания
@@ -456,7 +466,6 @@ class Bot:
 				self.answerAskIfCanSend(vid, user['question_progress'])
 				return True
 
-
 		if data['type'] == PayloadTypes.enter_credentials:
 			# Переводим пользователя на ввод логина и пароля дневника
 			user['state'] = States.enter_login
@@ -488,6 +497,8 @@ class Bot:
 				vid = event.obj.message['peer_id']		# ID отправившего
 				message_id = event.obj.message['id']	# ID сообщения
 				from_group = message_id == 0			# Из группы ли?
+
+				self.last_vid = vid # Сохраняем кто последний писал. Необходимо для отчёта об ошибке
 
 				if len(text) == 0:
 					continue
@@ -544,7 +555,18 @@ def main(args):
 	session = api.start(args)
 
 	# Инициализация бота
-	bot = Bot(session)
+	__dir__ = os.path.dirname(os.path.abspath(__file__))
+	bot = Bot(session, __dir__)
+
+	# Настройка логирования
+	logging.basicConfig(
+		format='\n%(asctime)s %(message)s',
+		datefmt='%Y-%m-%d %H:%M:%S',
+		filename=__dir__+'/error.log',
+		encoding='utf-8',
+		filemode='a',
+		level=logging.ERROR
+	)
 
 	# Цикл работы бота
 	while(True):
@@ -554,6 +576,27 @@ def main(args):
 			print2('\nПока!', 'green')
 			database.stop()
 			sys.exit(0)
+
+		except ConnectionError:
+			# Такие ошибки довольно часты на сервере техникума и поэтому не уведомляем никого об этом
+			print2('Connection error', 'red')
+			logging.error('ошибка подключения')
+			try:
+				time.sleep(30)
+			except KeyboardInterrupt:
+				print2('\nПока!', 'red')
+				database.stop()
+				sys.exit(0)
+
+		except Exception as e:
+			api.tgErrorReport(str(e))
+			try:
+				api.send(bot.last_vid, bot.answers['exception'].format(str(e)))
+			except:
+				pass
+			print2(str(e), 'red')
+			logging.exception('обработана ошибка')
+
 
 if __name__ == "__main__":
 	main(sys.argv)

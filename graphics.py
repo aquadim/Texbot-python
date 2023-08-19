@@ -6,6 +6,7 @@ import threading
 import os
 import random
 import database
+import logging
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from utils import *
 
@@ -28,6 +29,8 @@ class TableGenerator(threading.Thread):
 		self.parent = parent
 		self.img_name = img_name
 		self.successful = False
+		self.finished = False
+		self.has_exception = False
 
 	def generateImage(self):
 		"""Метод генерации изображения"""
@@ -49,14 +52,18 @@ class TableGenerator(threading.Thread):
 
 	def onFinish(self, status):
 		"""Вызывается в конце"""
+		self.successful = status == 0
 		try:
-			self.successful = status == 0
 			if status == 0:
 				self.onSuccess()
 			else:
 				self.onFail(status)
-		except Exception as e:
+		except:
+			self.has_exception = True
+			self.exception = e
+			logging.exception('ошибка в TableGenerator при завершении процесса')
 			print2(str(e), 'red')
+		self.finished = True
 
 		self.parent.completeTask(self)
 
@@ -66,6 +73,9 @@ class TableGenerator(threading.Thread):
 		try:
 			image = self.generateImage()
 		except Exception as e:
+			self.has_exception = True
+			self.exception = e
+			logging.exception('обработана ошибка в TableGenerator при генерации изображения')
 			print2(str(e), 'red')
 			self.onFinish(1)
 			return
@@ -96,7 +106,7 @@ class ScheduleGenerator(TableGenerator):
 
 	def onFail(self, status):
 		if status == 1:
-			api.edit(self.vid, self.msg_id, 'Произошла неизвестная ошибка')
+			api.edit(self.vid, self.msg_id, 'Произошла ошибка')
 		elif status == 2:
 			api.edit(self.vid, self.msg_id, '(Нет данных)')
 
@@ -275,6 +285,7 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 	"""Создаёт поверхность таблицы из данного двумерного массива данных"""
 	width = len(data[0])
 	height = len(data)
+	1/0
 
 	line_vertical_padding = 5
 	line_horizonal_padding = 5
