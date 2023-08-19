@@ -338,6 +338,12 @@ class Bot:
 
 		for index, k in enumerate(keyboards):
 			api.send(vid, self.answers['select-teacher'].format(index + 1, amount), k)
+
+	def answerUpdateHub(self, vid, user_type):
+		"""Присылает клавиатуру с меню"""
+
+		if user_type == 1:
+			api.send(vid, self.answers['updating-menu'], self.keyboards['stud_hub'])
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -358,6 +364,9 @@ class Bot:
 				return False
 			if text == 'Где преподаватель?':
 				self.answerSelectTeacher(vid, message_id + 1)
+				return False
+			if text == '.':
+				self.answerUpdateHub(vid, user['type'])
 
 		if user['state'] == States.void:
 			# Заглушка
