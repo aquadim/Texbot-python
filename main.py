@@ -12,6 +12,7 @@ import os
 import json
 import graphics
 import hashlib
+import math
 from utils import *
 
 class States:
@@ -28,10 +29,12 @@ class PayloadTypes:
 	show_terms			= 1	# Показать условия использования
 	select_date 		= 2	# Выбор даты
 	enter_credentials	= 3	# Ввод данных журнала
+	select_teacher		= 4 # Выбор преподавателя
 
 class Purposes:
-	registration	= 0 # Для регистрации
-	stud_rasp_view	= 1 # Просмотр расписания студентом
+	registration		= 0 # Для регистрации
+	stud_rasp_view		= 1 # Просмотр расписания группы
+	teacher_rasp_view	= 2 # Просмотр расписания преподавателя
 
 class Bot:
 	def __init__(self, session):
@@ -102,14 +105,18 @@ class Bot:
 
 		return kb.get_keyboard()
 
-	def makeKeyboardSelectDate(self, purpose, msg_id, gid):
-		"""Возвращает разметку клавиатры для выбора даты расписания"""
+	def makeKeyboardSelectDateForGroup(self, purpose, msg_id, gid):
+		"""Возвращает разметку клавиатуры для выбора даты расписания у группы"""
 		dates = database.getScheduleDatesByGid(gid)
 		if not dates:
 			return False
 
 		kb = VkKeyboard(inline=True)
-		button_payload = {'type': PayloadTypes.select_date, 'purpose': purpose, 'msg_id': msg_id}
+		button_payload = {
+			'type': PayloadTypes.select_date,
+			'purpose': purpose,
+			'msg_id': msg_id
+		}
 
 		for index, item in enumerate(dates):
 			button_payload['schedule_id'] = item['id']
@@ -117,6 +124,54 @@ class Bot:
 			if index != len(dates) - 1:
 				kb.add_line()
 		return kb.get_keyboard()
+
+	def makeKeyboardSelectDateForTeacher(self, purpose, msg_id, teacher_id):
+		"""Возвращает клавиатуру выбора даты в которой хранится информация о выбранном преподавателе"""
+		dates = database.getRelevantScheduleDates()
+		if not dates:
+			return False
+
+		kb = VkKeyboard(inline=True)
+		button_payload = {
+			'type': PayloadTypes.select_date,
+			'purpose': purpose,
+			'msg_id': msg_id,
+			'teacher_id': teacher_id
+		}
+
+		for index, item in enumerate(dates):
+			button_payload['date'] = item['day']
+			kb.add_callback_button(getDateName(item['day']), payload=button_payload)
+			if index != len(dates) - 1:
+				kb.add_line()
+		return kb.get_keyboard()
+
+	def makeTeacherSelectKeyboards(self, teachers, purpose, msg_id):
+		"""Возвращает клавиатуры для выбора преподавателя"""
+		output = []
+
+		button_payload = {
+			'type': PayloadTypes.select_teacher,
+			'purpose': purpose,
+			'msg_id': msg_id,
+			'amount': math.ceil(len(teachers) / 9)
+		}
+
+		for i in range(0, len(teachers), 9):
+			kb = VkKeyboard(inline=True)
+			for y in range(i, i + 9, 3):
+				for x in range(3):
+					button_payload['teacher_id'] = teachers[y + x]['id']
+					kb.add_callback_button(teachers[y + x]['surname'], payload=button_payload)
+					if x + y >= len(teachers) - 1:
+						# Преподаватели закончились
+						output.append(kb.get_keyboard())
+						return output
+				if y != i + 6:
+					kb.add_line()
+			output.append(kb.get_keyboard())
+
+		return output
 	# КОНЕЦ ГЕНЕРАТОРОВ КЛАВИАТУР
 
 	# ОТВЕТЫ БОТА
@@ -159,28 +214,32 @@ class Bot:
 		"""Добро пожаловать"""
 		api.send(vid, self.answers['welcome_post_reg'], self.keyboards[keyboard_name])
 
-	def answerSelectDate(self, vid, msg_id, gid):
-		"""Выбор даты"""
-		keyboard = self.makeKeyboardSelectDate(Purposes.stud_rasp_view, msg_id, gid)
+	def answerSelectDate(self, vid, msg_id, target, for_teacher):
+		"""Отсылает сообщение с выбором даты"""
+		if for_teacher:
+			keyboard = self.makeKeyboardSelectDateForTeacher(Purposes.teacher_rasp_view, msg_id, target)
+		else:
+			keyboard = self.makeKeyboardSelectDateForGroup(Purposes.stud_rasp_view, msg_id, target)
+
 		if not keyboard:
 			api.send(vid, self.answers['no_relevant_data'])
 		else:
 			api.send(vid, self.answers['pick_day'], kb=keyboard)
 
-	def answerShowSchedule(self, vid, msg_id, schedule_id):
-		"""Показ расписания"""
+	def answerShowScheduleForGroup(self, vid, schedule_id):
+		"""Показ расписания для группы"""
 		response = database.getScheduleDataForGroup(schedule_id)
 
 		# Расписание кэшировано?
 		if response['photo_id']:
-			api.edit(vid, msg_id, None, None, 'photo'+str(self.config['public_id'])+'_'+str(response['photo_id']))
+			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(response['photo_id']))
 		else:
 			# Прикол для Виталия :P
 			if vid == 240088163:
 				api.send(vid, self.getRandomWaitText())
 
 			# Нет кэшированного изображения, делаем
-			api.edit(vid, msg_id, self.getRandomWaitText())
+			msg_id = api.send(vid, self.getRandomWaitText())
 
 			# Получаем пары расписания
 			pairs = database.getPairsForGroup(schedule_id)
@@ -205,6 +264,10 @@ class Bot:
 				False
 			))
 			self.tasks[-1].start()
+
+	def answerShowScheduleForTeacher(self, vid, msg_id, date, teacher_id):
+		"""Показ расписания для преподавателя"""
+		response = database.getScheduleDataForTeacher(date, teacher_id)
 
 	def answerShowGrades(self, vid, user_id, msg_id, login, password):
 		"""Показ оценок"""
@@ -253,8 +316,6 @@ class Bot:
 			api.send(vid, self.answers['get-next-fail'])
 			return
 
-		print(response)
-
 		# Оставшееся время
 		hours_left = response['dt'] * 24
 		minutes_left = (hours_left - int(hours_left)) * 60
@@ -266,6 +327,17 @@ class Bot:
 			response['pair_place'],
 			response['pair_time']
 		))
+
+	def answerSelectTeacher(self, vid, message_id):
+		"""Отправляет сообщения с клавиатурами выбора преподавателя"""
+
+		# Узнаём какие вообще есть преподаватели
+		teachers = database.getAllTeachers()
+		keyboards = self.makeTeacherSelectKeyboards(teachers, Purposes.teacher_rasp_view, message_id)
+		amount = len(keyboards)
+
+		for index, k in enumerate(keyboards):
+			api.send(vid, self.answers['select-teacher'].format(index + 1, amount), k)
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -276,7 +348,7 @@ class Bot:
 		if user['state'] == States.hub:
 			# Выбор функции бота
 			if text == 'Расписание':
-				self.answerSelectDate(vid, message_id + 1, user['gid'])
+				self.answerSelectDate(vid, message_id + 1, user['gid'], False)
 				return False
 			if text == 'Оценки':
 				self.answerShowGrades(vid, user['id'], message_id + 1, user['journal_login'], user['journal_password'])
@@ -284,6 +356,8 @@ class Bot:
 			if text == 'Что дальше?':
 				self.answerWhatsNext(vid, user['gid'])
 				return False
+			if text == 'Где преподаватель?':
+				self.answerSelectTeacher(vid, message_id + 1)
 
 		if user['state'] == States.void:
 			# Заглушка
@@ -353,7 +427,7 @@ class Bot:
 			self.answerToHub(vid, user['type'])
 			return True
 
-	def handleMessageWithPayload(self, data, user):
+	def handleMessageWithPayload(self, data, user, message_id):
 		"""handleMessage для сообщений с доп. данными"""
 		vid = user['vk_id']
 
@@ -374,14 +448,32 @@ class Bot:
 		if data['type'] == PayloadTypes.select_date:
 			# Выбрана дата.. но для чего?
 			if data['purpose'] == Purposes.stud_rasp_view:
-				self.answerShowSchedule(vid, data['msg_id'], data['schedule_id'])
+				# Просмотр расписания группы
+				self.answerShowScheduleForGroup(vid, data['schedule_id'])
 				return False
+			if data['purpose'] == Purposes.teacher_rasp_view:
+				# Просмотр расписания преподавателя
+				self.answerShowScheduleForTeacher(vid, data['msg_id'], data['date'], data['teacher_id'])
 
 		if data['type'] == PayloadTypes.enter_credentials:
 			# Переводим пользователя на ввод логина и пароля дневника
 			user['state'] = States.enter_login
 			self.answerAskJournalLogin(vid)
 			return True
+
+		if data['type'] == PayloadTypes.select_teacher:
+			# Выбран преподаватель... но для чего?
+			if data['purpose'] == Purposes.teacher_rasp_view:
+				# Просмотр расписания преподавателя
+
+				# Удаляем прошлые сообщения
+				to_delete = ''
+				for i in range(data['msg_id'], data['msg_id'] + data['amount']):
+					to_delete += str(i) + ','
+				api.delete(to_delete)
+
+				# Отправляем сообщение с выбором даты
+				self.answerSelectDate(vid, message_id + 1, data['teacher_id'], True)
 
 	def run(self):
 		"""Принимает и обрабатывает входящие события"""
@@ -413,7 +505,7 @@ class Bot:
 					# Не первый запуск
 					if 'payload' in event.obj.message:
 						message_data = json.loads(event.obj.message['payload'])
-						need_update = self.handleMessageWithPayload(message_data, user)
+						need_update = self.handleMessageWithPayload(message_data, user, message_id)
 					else:
 						need_update = self.handleMessage(text, user, message_id)
 
@@ -425,8 +517,16 @@ class Bot:
 				# Новое событие
 				vid = event.obj.peer_id
 				message_data = event.obj.payload
+				event_id = event.obj.event_id
+				message_id = None
+
 				user = database.getUserInfo(vid)
-				need_update = self.handleMessageWithPayload(message_data, user)
+				need_update = self.handleMessageWithPayload(message_data, user, message_id)
+
+				if need_update:
+					database.saveUserData(user)
+
+				api.answerCallback(event_id, vid, event.obj.peer_id)
 
 def main(args):
 	"""Входная точка программы"""

@@ -30,7 +30,7 @@ def start(args):
 
 def send(vid, msg, kb = None, attach = None):
 	"""Отправляет сообщение пользователю"""
-	API.messages.send(
+	return API.messages.send(
 		peer_id = vid,
 		message = msg,
 		keyboard = kb,
@@ -48,6 +48,12 @@ def edit(vid, msg_id, msg, kb = None, attach = None):
 		message_id = msg_id
 	)
 
+def delete(msg_id):
+	try:
+		API.messages.delete(message_ids=msg_id, delete_for_all=True)
+	except:
+		pass
+
 def uploadImage(image_path):
 	"""Загружает изображение с диска и получает id загрузки для параметра attachment"""
 	# Чтение данных
@@ -63,3 +69,10 @@ def uploadImage(image_path):
 	# Получение id изображения
 	return API.photos.saveMessagesPhoto(server=response["server"], photo=response["photo"], hash=response["hash"])[0]["id"]
 
+def answerCallback(event_id, vid, peer_id):
+	"""Отвечает на callback кнопку"""
+	API.messages.sendMessageEventAnswer(
+		event_id=event_id,
+		user_id=vid,
+		peer_id=peer_id
+	)
