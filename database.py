@@ -44,7 +44,7 @@ def start():
 		"PRIMARY KEY('id'))"
 	)
 
-	# Таблица users_grades
+	# Таблица users_grades - оценки пользователей
 	# user_id - id пользователя
 	# date_create - дата создания
 	# photo_id - id фотографии
@@ -58,11 +58,11 @@ def start():
 		"FOREIGN KEY('user_id') REFERENCES 'users'('id') ON DELETE CASCADE)"
 	)
 
-	# Таблица groups
+	# Таблица groups - группы техникума
 	# course - номер курса
 	# spec - специальность
 	# join_year - год поступления
-	# class_teacher_id - id вконтакте классрука
+	# class_teacher_id - id классрука
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS groups("
 		"id INTEGER,"
@@ -127,6 +127,18 @@ def start():
 		"PRIMARY KEY('id'))"
 	)
 
+	# Таблица teachers_schedule_cache - хранение photo_id для расписаний преподавателя
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS teachers_schedule_cache("
+		"id INTEGER,"
+		"date DATE,"
+		"teacher_id INTEGER,"
+		"photo_id INTEGER,"
+		"PRIMARY KEY('id')"
+		"FOREIGN KEY('teacher_id') REFERENCES 'teachers'('id') ON DELETE CASCADE ON UPDATE CASCADE)"
+	)
+
+
 	db.commit()
 
 def stop():
@@ -151,8 +163,8 @@ def createUser(vid):
 def saveUserData(user):
 	"""Сохраняет все данные пользователя"""
 	cur.execute(
-		"UPDATE users SET state=?, type=?, question_progress=?, allows_mail=?, gid=?, journal_login=?, journal_password=?, teacher_id=?",
-		(user['state'], user['type'], user['question_progress'], user['allows_mail'], user['gid'], user['journal_login'], user['journal_password'], user['teacher_id']))
+		"UPDATE users SET state=?, type=?, question_progress=?, allows_mail=?, gid=?, journal_login=?, journal_password=?, teacher_id=? WHERE vk_id=?",
+		(user['state'], user['type'], user['question_progress'], user['allows_mail'], user['gid'], user['journal_login'], user['journal_password'], user['teacher_id'], user['vk_id']))
 	db.commit()
 
 # Группы
@@ -187,7 +199,7 @@ def getTeacherId(name):
 	else:
 		return response['id']
 
-# Функция: Расписание (для студента)
+# Функция: Расписание (для группы)
 def getScheduleDatesByGid(gid):
 	"""Возвращает актуальные даты расписаний для данной группы"""
 	response = cur.execute(
@@ -223,6 +235,37 @@ def getPairsForGroup(schedule_id):
 	for row in response:
 		pairs.append((row['pair_time'], row['pair_name'], row['pair_place']))
 	return pairs
+
+# Функция: Где преподаватель
+def getAllTeachers():
+	"""Возвращает всех преподаватей"""
+	response = cur.execute("SELECT * FROM teachers ORDER BY surname ASC").fetchall()
+	return response
+
+def getRelevantScheduleDates():
+	"""Возвращает актуальные даты расписания"""
+	response = cur.execute("SELECT day FROM schedules WHERE day < date('now', '+3 days')")
+	if not response:
+		return False
+	else:
+		return response
+
+def getScheduleDataForTeacher(date, teacher_id):
+	"""Возвращает данные пар для преподавателя"""
+	response = cur.execute(
+		"SELECT pairs.time as pair_time, pairs.name as pair_name, pairs_places.place as pair_place, groups.course || groups.spec as group_name"
+		"FROM pairs_places"
+			"LEFT JOIN pairs ON pairs.id = pairs_places.pair_id"
+			"LEFT JOIN schedules ON schedules.id = pairs.schedule_id"
+			"LEFT JOIN groups ON groups.id = schedules.gid"
+		"WHERE pairs_places.teacher_id = ? AND schedules.day=?"
+		"ORDER BY pairs.sort",
+		(teacher_id, date)
+	).fetchall()
+	if not response:
+		return False
+	else:
+		return response
 
 # Функция: Оценки
 def getMostRecentGradesImage(user_id):
