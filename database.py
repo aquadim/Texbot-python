@@ -215,7 +215,7 @@ def getScheduleDatesByGid(gid):
 		return response
 
 def getScheduleDataForGroup(date, gid):
-	"""Возвращает кэшированное photo_id, расписания"""
+	"""Возвращает кэшированное photo_id расписания"""
 	response = cur.execute("SELECT photo_id FROM schedules WHERE day=? AND gid=?", (date,gid)).fetchone()
 	if not response:
 		return False

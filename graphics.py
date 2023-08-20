@@ -285,7 +285,6 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 	"""Создаёт поверхность таблицы из данного двумерного массива данных"""
 	width = len(data[0])
 	height = len(data)
-	1/0
 
 	line_vertical_padding = 5
 	line_horizonal_padding = 5

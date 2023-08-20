@@ -33,6 +33,7 @@ class PayloadTypes:
 	select_date 		= 2	# Выбор даты
 	enter_credentials	= 3	# Ввод данных журнала
 	select_teacher		= 4 # Выбор преподавателя
+	select_course		= 5 # Выбор курса
 
 class Purposes:
 	registration		= 0 # Для регистрации
@@ -103,15 +104,15 @@ class Bot:
 			return False
 
 	# ГЕНЕРАТОРЫ КЛАВИАТУР
-	def makeKeyboardSelectGroup(self, data, purpose):
-		"""Генерирует разметку клавиатуры для выбор группы"""
+	def makeKeyboardSelectGroup(self, data, msg_id, purpose):
+		"""Генерирует разметку клавиатуры для выбора группы"""
 		added = 0
 		kb = VkKeyboard(inline=True)
-		button_payload = {'type': PayloadTypes.select_group, 'purpose': purpose}
+		button_payload = {'type': PayloadTypes.select_group, 'msg_id': msg_id, 'purpose': purpose}
 
 		for index, item in enumerate(data):
 			button_payload['gid'] = item['id']
-			kb.add_button(item['spec'], payload=button_payload)
+			kb.add_callback_button(item['spec'], payload=button_payload)
 
 			added += 1
 			if added % 3 == 0 and index != len(data) - 1:
@@ -166,6 +167,16 @@ class Bot:
 			output.append(kb.get_keyboard())
 
 		return output
+
+	def makeKeyboardSelectCourse(self, msg_id, purpose):
+		"""Генерирует клавиатуру выбор курса"""
+		output = VkKeyboard(inline=True)
+		output.add_callback_button('1', payload={'type': PayloadTypes.select_course, 'purpose': purpose, 'num': 1, "msg_id": msg_id})
+		output.add_callback_button('2', payload={'type': PayloadTypes.select_course, 'purpose': purpose, 'num': 2, "msg_id": msg_id})
+		output.add_line()
+		output.add_callback_button('3', payload={'type': PayloadTypes.select_course, 'purpose': purpose, 'num': 3, "msg_id": msg_id})
+		output.add_callback_button('4', payload={'type': PayloadTypes.select_course, 'purpose': purpose, 'num': 4, "msg_id": msg_id})
+		return output.get_keyboard()
 	# КОНЕЦ ГЕНЕРАТОРОВ КЛАВИАТУР
 
 	# ОТВЕТЫ БОТА
@@ -193,7 +204,7 @@ class Bot:
 		api.send(
 			vid,
 			self.answers['question_what_is_your_group'].format(progress),
-			self.makeKeyboardSelectGroup(group_names, Purposes.registration)
+			self.makeKeyboardSelectGroup(group_names, None, Purposes.registration)
 		)
 
 	def answerAskIfCanSend(self, vid, progress):
@@ -208,7 +219,7 @@ class Bot:
 		"""Добро пожаловать"""
 		api.send(vid, self.answers['welcome_post_reg'], self.keyboards[keyboard_name])
 
-	def answerSelectDate(self, vid, msg_id, target, for_teacher):
+	def answerSelectDate(self, vid, msg_id, target, for_teacher, edit=False):
 		"""Отсылает сообщение с выбором даты"""
 		if for_teacher:
 			purpose = Purposes.teacher_rasp_view
@@ -219,11 +230,18 @@ class Bot:
 		if not keyboard:
 			api.send(vid, self.answers['no_relevant_data'])
 		else:
-			api.send(vid, self.answers['pick_day'], kb=keyboard)
+			if edit:
+				api.edit(vid, msg_id, self.answers['pick_day'], kb=keyboard)
+			else:
+				api.send(vid, self.answers['pick_day'], kb=keyboard)
 
 	def answerShowScheduleForGroup(self, vid, date, gid):
 		"""Показ расписания для группы"""
 		response = database.getScheduleDataForGroup(date, gid)
+
+		if not response:
+			api.send(vid, self.answers['no-data'])
+			return
 
 		# Расписание кэшировано?
 		if response['photo_id']:
@@ -268,7 +286,6 @@ class Bot:
 			teacher_id
 		))
 		self.tasks[-1].start()
-
 
 	def answerShowGrades(self, vid, user_id, msg_id, login, password):
 		"""Показ оценок"""
@@ -342,9 +359,27 @@ class Bot:
 
 	def answerUpdateHub(self, vid, user_type):
 		"""Присылает клавиатуру с меню"""
-
 		if user_type == 1:
 			api.send(vid, self.answers['updating-menu'], self.keyboards['stud_hub'])
+
+	def answerSelectGroupCourse(self, vid, msg_id, purpose):
+		"""Отправляет сообщение с выбором курса"""
+		keyboard = self.makeKeyboardSelectCourse(msg_id, purpose)
+		api.send(vid, self.answers['select-course'], keyboard)
+
+	def answerSelectGroupSpec(self, vid, msg_id, course, purpose):
+		"""Отправляет сообщение с выбором группы"""
+		group_names = database.getGroupsByCourse(course)
+		api.edit(
+			vid,
+			msg_id,
+			self.answers['select-group'],
+			self.makeKeyboardSelectGroup(group_names, msg_id, purpose)
+		)
+
+	def answerBells(self, vid):
+		"""Отправляет сообщение с расписанием звонков"""
+		api.send(vid, self.answers['bells-schedule'])
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -356,18 +391,19 @@ class Bot:
 			# Выбор функции бота
 			if text == 'Расписание':
 				self.answerSelectDate(vid, message_id + 1, user['gid'], False)
-				return False
 			if text == 'Оценки':
 				self.answerShowGrades(vid, user['id'], message_id + 1, user['journal_login'], user['journal_password'])
-				return False
 			if text == 'Что дальше?':
 				self.answerWhatsNext(vid, user['gid'])
-				return False
 			if text == 'Где преподаватель?':
 				self.answerSelectTeacher(vid, message_id + 1)
-				return False
+			if text == 'Расписание группы':
+				self.answerSelectGroupCourse(vid, message_id + 1, Purposes.stud_rasp_view)
+			if text == 'Звонки':
+				self.answerBells(vid)
 			if text == '.':
 				self.answerUpdateHub(vid, user['type'])
+			return False
 
 		if user['state'] == States.void:
 			# Заглушка
@@ -452,6 +488,12 @@ class Bot:
 				self.answerShowScheduleForTeacher(vid, data['msg_id'], data['date'], data['target'])
 				return False
 
+		if data['type'] == PayloadTypes.select_course:
+			# Выбран номер курса... но для чего?
+			if data['purpose'] == Purposes.stud_rasp_view:
+				self.answerSelectGroupSpec(vid, data['msg_id'], data['num'], Purposes.stud_rasp_view)
+				return False
+
 		if data['type'] == PayloadTypes.show_terms:
 			# Показ условий использования
 			self.answerShowTerms(vid)
@@ -465,6 +507,8 @@ class Bot:
 				user['state'] = States.reg_can_send
 				self.answerAskIfCanSend(vid, user['question_progress'])
 				return True
+			if data['purpose'] == Purposes.stud_rasp_view:
+				self.answerSelectDate(vid, data['msg_id'], data['gid'], False, True)
 
 		if data['type'] == PayloadTypes.enter_credentials:
 			# Переводим пользователя на ввод логина и пароля дневника
