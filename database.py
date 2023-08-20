@@ -225,7 +225,7 @@ def getScheduleDataForGroup(date, gid):
 def getPairsForGroup(schedule_id):
 	"""Возвращает пары для группы на заданную дату"""
 	response = cur.execute(
-		"SELECT pairs.time as pair_time, pairs.name as pair_name, group_concat(teachers.surname || ' ' || pairs_places.place, '/') as pair_place FROM pairs "
+		"SELECT pairs.time as pair_time, pairs.name as pair_name, group_concat(teachers.surname || ' ' || ifnull(pairs_places.place,'н/д'), '/') as pair_place FROM pairs "
 		"LEFT JOIN schedules ON pairs.schedule_id = schedules.id "
 		"LEFT JOIN pairs_places ON pairs.id = pairs_places.pair_id "
 		"LEFT JOIN teachers ON teachers.id = pairs_places.teacher_id "
@@ -256,7 +256,7 @@ def getRelevantScheduleDates():
 def getScheduleDataForTeacher(date, teacher_id):
 	"""Возвращает данные пар для преподавателя"""
 	response = cur.execute(
-		"SELECT pairs.time as pair_time, pairs.name as pair_name, pairs_places.place as pair_place, groups.course || groups.spec as group_name "
+		"SELECT pairs.time as pair_time, pairs.name as pair_name, ifnull(pairs_places.place,'н/д') as pair_place, groups.course || groups.spec as group_name "
 		"FROM pairs_places "
 			"LEFT JOIN pairs ON pairs.id = pairs_places.pair_id "
 			"LEFT JOIN schedules ON schedules.id = pairs.schedule_id "
