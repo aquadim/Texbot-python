@@ -80,8 +80,8 @@ class TableGenerator(threading.Thread):
 			self.onFinish(1)
 			return
 
-		if image == None:
-			self.onFinish(2)
+		if type(image) == int:
+			self.onFinish(image)
 			return
 
 		# Загрузка на сервера ВКонтакте
@@ -120,7 +120,7 @@ class TeacherScheduleGenerator(ScheduleGenerator):
 		# Генерация изображения и текста сообщения
 		data = database.getScheduleDataForTeacher(self.date, self.teacher_id)
 		if not data:
-			return None
+			return 2
 		data.insert(0, ("Время", "Дисциплина", "Место проведения", "Группа"))
 		return makeTableImage(
 			data,
@@ -141,7 +141,7 @@ class GroupScheduleGenerator(ScheduleGenerator):
 		self.schedule_id = database.getScheduleId(self.gid, self.date)
 		data = database.getPairsForGroup(self.schedule_id)
 		if not data:
-			return None
+			return 2
 		data.insert(0, ("Время", "Дисциплина", "Место проведения"))
 		return makeTableImage(
 			data,
@@ -154,26 +154,25 @@ class GroupScheduleGenerator(ScheduleGenerator):
 
 class GradesGenerator(TableGenerator):
 	"""Класс для асинхронной генерации изображений таблиц оценок"""
-	def __init__(self, theme, vid, msg_id, public_id, parent, login, password, user_id, keyboard):
-		super().__init__(vid, public_id, theme, parent)
+	def __init__(self, vid, public_id, theme, parent, img_name, msg_id, login, password, keyboard, user_id):
+		super().__init__(vid, public_id, theme, parent, img_name)
 		self.msg_id = msg_id
 		self.login = login
 		self.password = password
-		self.user_id = user_id
 		self.keyboard = keyboard
-		self.error = 0 # Код ошибки. 0 - неизвестно, 1 - неверный логин или пароль
+		self.user_id = user_id
 
 	def onSuccess(self):
 		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
 
-	def onFail(self):
-		if self.error == 0:
-			api.edit(self.vid, self.msg_id, 'Произошла ошибка. Пожалуйста сообщите об этом администрации')
-		elif self.error == 1:
+	def onFail(self, status):
+		if status == 1:
+			api.edit(self.vid, self.msg_id, 'Произошла ошибка')
+		elif status == 2:
 			api.edit(
 				self.vid,
 				self.msg_id,
-				'Не удалось собрать оценки, так как неизвестны твои логин и пароль от дневника.',
+				'Не удалось собрать оценки, так как неизвестны твои логин и пароль от дневника либо они неверны.',
 				self.keyboard
 			)
 
@@ -197,8 +196,7 @@ class GradesGenerator(TableGenerator):
 			options = soup.find('select', attrs = {'name': 'PERIODLIST'}).findAll('option', recursive=False)
 		except AttributeError:
 			# Не найден PERIODLIST - следовательно логин и/или пароль неверны
-			self.error = 1
-			return None
+			return 2
 
 		# Выбираем нужный period_id
 		now = datetime.datetime.now()

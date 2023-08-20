@@ -19,13 +19,15 @@ from requests.exceptions import *
 from utils import *
 
 class States:
-	reg_1			= 0
-	select_course	= 1
-	void			= 2
-	reg_can_send	= 3
-	hub				= 4
-	enter_login		= 5
-	enter_password	= 6
+	reg_1						= 0 # Ответ студент или нет
+	select_course				= 1 # Выбор курса студента
+	void						= 2 # Нет реакции бота
+	reg_can_send				= 3 # Ответ можно ли отправлять рассылки
+	hub							= 4 # Выбор функции
+	enter_login					= 5 # Ввод логина
+	enter_password				= 6 # Ввод пароля
+	enter_login_after_profile	= 7 # Ввод логина, потом ставим 8
+	enter_password_after_profile= 8 # Ввод пароля, потом показываем профиль
 
 class PayloadTypes:
 	select_group		= 0	# Выбор группы
@@ -34,17 +36,22 @@ class PayloadTypes:
 	enter_credentials	= 3	# Ввод данных журнала
 	select_teacher		= 4 # Выбор преподавателя
 	select_course		= 5 # Выбор курса
+	edit_group			= 6 # Смена группы
+	toggle_mail			= 7 # Переключение разрешения рассылок
 
 class Purposes:
 	registration		= 0 # Для регистрации
 	stud_rasp_view		= 1 # Просмотр расписания группы
 	teacher_rasp_view	= 2 # Просмотр расписания преподавателя
+	edit_student		= 3 # Изменение для студента
+	edit_teacher		= 4 # Изменение для преподавателя
 
 class Bot:
-	def __init__(self, session, cwd):
+	def __init__(self, session, cwd, print_user):
 		"""Инициализация"""
 		self.dir = cwd
 		self.tasks = []
+		self.print_user = print_user
 
 		# Загрузка ответов
 		with open(self.dir + "/config/answers.json", 'r', encoding='utf-8') as f:
@@ -177,6 +184,37 @@ class Bot:
 		output.add_callback_button('3', payload={'type': PayloadTypes.select_course, 'purpose': purpose, 'num': 3, "msg_id": msg_id})
 		output.add_callback_button('4', payload={'type': PayloadTypes.select_course, 'purpose': purpose, 'num': 4, "msg_id": msg_id})
 		return output.get_keyboard()
+
+	def makeProfileKeyboard(self, msg_id, user):
+		"""Отправляет клавиатуру профиля"""
+		output = VkKeyboard(inline=True)
+
+		if user['type'] == 1:
+			output.add_callback_button('Сменить группу', payload={'type': PayloadTypes.edit_group, 'purpose': Purposes.edit_student, "msg_id": msg_id})
+
+			if user['journal_login'] == None:
+				credentials_text = 'Ввести логин и пароль'
+				credentials_color = VkKeyboardColor.POSITIVE
+			else:
+				credentials_text = 'Изменить логин и пароль'
+				credentials_color = VkKeyboardColor.PRIMARY
+			output.add_callback_button(
+				credentials_text,
+				payload={'type': PayloadTypes.enter_credentials, 'after_profile': True},
+				color=credentials_color
+			)
+
+		output.add_line()
+		if user['allows_mail'] == 1:
+			mail_text = 'Запретить рассылку'
+			mail_color = VkKeyboardColor.NEGATIVE
+		else:
+			mail_text = 'Разрешить рассылку'
+			mail_color = VkKeyboardColor.POSITIVE
+
+		output.add_callback_button(mail_text, payload={'type': PayloadTypes.toggle_mail, 'msg_id': msg_id}, color=mail_color)
+
+		return output.get_keyboard()
 	# КОНЕЦ ГЕНЕРАТОРОВ КЛАВИАТУР
 
 	# ОТВЕТЫ БОТА
@@ -297,15 +335,16 @@ class Bot:
 			api.send(vid, self.getRandomWaitText())
 			# Запускаем процесс сбора оценок
 			self.tasks.append(graphics.GradesGenerator(
-				self.themes['grades'],
 				vid,
-				msg_id,
 				self.config['public_id'],
+				self.themes['grades'],
 				self,
+				'grades',
+				msg_id,
 				login,
 				password,
-				user_id,
-				self.keyboards['enter_journal_credentials']
+				self.keyboards['enter_journal_credentials'],
+				user_id
 			))
 			self.tasks[-1].start()
 
@@ -362,10 +401,13 @@ class Bot:
 		if user_type == 1:
 			api.send(vid, self.answers['updating-menu'], self.keyboards['stud_hub'])
 
-	def answerSelectGroupCourse(self, vid, msg_id, purpose):
+	def answerSelectGroupCourse(self, vid, msg_id, purpose, edit):
 		"""Отправляет сообщение с выбором курса"""
 		keyboard = self.makeKeyboardSelectCourse(msg_id, purpose)
-		api.send(vid, self.answers['select-course'], keyboard)
+		if edit:
+			api.edit(vid, msg_id, self.answers['select-course'], keyboard)
+		else:
+			api.send(vid, self.answers['select-course'], keyboard)
 
 	def answerSelectGroupSpec(self, vid, msg_id, course, purpose):
 		"""Отправляет сообщение с выбором группы"""
@@ -380,6 +422,33 @@ class Bot:
 	def answerBells(self, vid):
 		"""Отправляет сообщение с расписанием звонков"""
 		api.send(vid, self.answers['bells-schedule'])
+
+	def answerShowProfile(self, vid, msg_id, user, edit):
+		"""Отправляет сообщение профиля"""
+		message = ""
+
+		if user['type'] == 1:
+			# Студент
+			message += self.answers['profile-identifier-student'].format(database.getGroupName(user['gid']))
+			if user['journal_login'] == None:
+				message += self.answers['profile-journal-not-filled']
+			else:
+				message += self.answers['profile-journal-filled'].format(user['journal_login'])
+		else:
+			# Преподаватель
+			message += self.answers['profile-identifier-student'].format(database.getTeacherSurname(user['teacher_id']))
+
+		if user['allows_mail'] == 1:
+			message += self.answers['profile-mail-allowed']
+		else:
+			message += self.answers['profile-mail-not-allowed']
+
+		keyboard = self.makeProfileKeyboard(msg_id, user)
+
+		if edit:
+			api.edit(vid, msg_id, message, keyboard)
+		else:
+			api.send(vid, message, keyboard)
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -398,9 +467,11 @@ class Bot:
 			if text == 'Где преподаватель?':
 				self.answerSelectTeacher(vid, message_id + 1)
 			if text == 'Расписание группы':
-				self.answerSelectGroupCourse(vid, message_id + 1, Purposes.stud_rasp_view)
+				self.answerSelectGroupCourse(vid, message_id + 1, Purposes.stud_rasp_view, False)
 			if text == 'Звонки':
 				self.answerBells(vid)
+			if text == 'Профиль':
+				self.answerShowProfile(vid, message_id + 1, user, False)
 			if text == '.':
 				self.answerUpdateHub(vid, user['type'])
 			return False
@@ -454,23 +525,30 @@ class Bot:
 			self.answerPostRegistration(vid, 'stud_hub')
 			return True
 
-		if user['state'] == States.enter_login:
+		if user['state'] == States.enter_login or user['state'] == States.enter_login_after_profile:
 			# Ввод логина
 			if self.checkIfCancelled(text, user):
 				return True
 			user['journal_login'] = text
-			user['state'] = States.enter_password
+			if user['state'] == States.enter_login:
+				user['state'] = States.enter_password
+			else:
+				user['state'] = States.enter_password_after_profile
 			self.answerAskJournalPassword(vid)
 			return True
 
-		if user['state'] == States.enter_password:
+		if user['state'] == States.enter_password or user['state'] == States.enter_password_after_profile:
 			# Ввод пароля
 			if self.checkIfCancelled(text, user):
 				return True
 			user['journal_password'] = hashlib.sha1(bytes(text, "utf-8")).hexdigest()
-			user['state'] = States.hub
+
 			self.answerDone(vid)
 			self.answerToHub(vid, user['type'])
+			if user['state'] == States.enter_password_after_profile:
+				self.answerShowProfile(vid, message_id + 1, user, False)
+
+			user['state'] = States.hub
 			return True
 
 	def handleMessageWithPayload(self, data, user, message_id):
@@ -489,10 +567,7 @@ class Bot:
 				return False
 
 		if data['type'] == PayloadTypes.select_course:
-			# Выбран номер курса... но для чего?
-			if data['purpose'] == Purposes.stud_rasp_view:
-				self.answerSelectGroupSpec(vid, data['msg_id'], data['num'], Purposes.stud_rasp_view)
-				return False
+			self.answerSelectGroupSpec(vid, data['msg_id'], data['num'], data['purpose'])
 
 		if data['type'] == PayloadTypes.show_terms:
 			# Показ условий использования
@@ -509,10 +584,18 @@ class Bot:
 				return True
 			if data['purpose'] == Purposes.stud_rasp_view:
 				self.answerSelectDate(vid, data['msg_id'], data['gid'], False, True)
+				return False
+			if data['purpose'] == Purposes.edit_student:
+				user['gid'] = data['gid']
+				self.answerShowProfile(vid, data['msg_id'], user, True)
+				return True
 
 		if data['type'] == PayloadTypes.enter_credentials:
 			# Переводим пользователя на ввод логина и пароля дневника
-			user['state'] = States.enter_login
+			if data['after_profile'] == False:
+				user['state'] = States.enter_login
+			else:
+				user['state'] = States.enter_login_after_profile
 			self.answerAskJournalLogin(vid)
 			return True
 
@@ -529,6 +612,22 @@ class Bot:
 
 				# Отправляем сообщение с выбором даты
 				self.answerSelectDate(vid, message_id + 1, data['teacher_id'], True)
+				return False
+
+		if data['type'] == PayloadTypes.edit_group:
+			# Изменение группы, привязанной к пользователю
+			if data['purpose'] == Purposes.edit_student:
+				self.answerSelectGroupCourse(vid, data['msg_id'], Purposes.edit_student, True)
+				return False
+
+		if data['type'] == PayloadTypes.toggle_mail:
+			# Переключение разрешения рассылки
+			if user['allows_mail'] == 1:
+				user['allows_mail'] = 0
+			else:
+				user['allows_mail'] = 1
+			self.answerShowProfile(vid, data['msg_id'], user, True)
+			return True
 
 	def run(self):
 		"""Принимает и обрабатывает входящие события"""
@@ -552,7 +651,9 @@ class Bot:
 					continue
 
 				user = database.getUserInfo(vid)
-				print('user: ', user)
+
+				if self.print_user:
+					print('user: ', user)
 
 				if not user:
 					# Первый запуск
@@ -589,7 +690,7 @@ def main(args):
 	"""Входная точка программы"""
 	# Проверяем аргументы
 	if not "-t" in args:
-		print2("Отсутствует параметр -t. Использование -t <vk token>", 'red')
+		print2("Отсутствует параметр -t. Использование -t <vk token> [--print-user]", 'red')
 		sys.exit(1)
 
 	# Инициализируем БД
@@ -600,7 +701,7 @@ def main(args):
 
 	# Инициализация бота
 	__dir__ = os.path.dirname(os.path.abspath(__file__))
-	bot = Bot(session, __dir__)
+	bot = Bot(session, __dir__, '--print-user' in args)
 
 	# Настройка логирования
 	logging.basicConfig(
