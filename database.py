@@ -305,7 +305,7 @@ def getNextPairForGroup(gid):
 		"SELECT "
 			"pairs.time AS pair_time, "
 			"pairs.name AS pair_name, "
-			"group_concat(teachers.surname || ' ' || pairs_places.place, '/') AS pair_place, "
+			"group_concat(teachers.surname || ' ' || ifnull(pairs_places.place,'н/д'), '/') AS pair_place, "
 			"julianday(schedules.day, pairs.time) - julianday('now', 'localtime') AS dt "
 		"FROM schedules "
 			"LEFT JOIN pairs ON pairs.schedule_id = schedules.id "
@@ -316,6 +316,31 @@ def getNextPairForGroup(gid):
 		"ORDER BY schedules.day ASC, pairs.time ASC "
 		"LIMIT 1 ",
 		(gid,)
+	).fetchone()
+
+	if not response:
+		return False
+	else:
+		return response
+
+def getNextPairForTeacher(teacher_id):
+	"""Возвращает следующую пару для группы и оставшееся до неё время в днях"""
+	response = cur.execute(
+		"SELECT "
+			"pairs.time AS pair_time,"
+			"pairs.name AS pair_name,"
+			"ifnull(pairs_places.place,'н/д') AS pair_place,"
+			"groups.course || groups.spec AS pair_group,"
+			"julianday(schedules.day, pairs.time) - julianday('now', 'localtime') AS dt "
+		"FROM schedules "
+			"LEFT JOIN pairs ON pairs.schedule_id = schedules.id "
+			"LEFT JOIN pairs_places ON pairs.id = pairs_places.pair_id "
+			"LEFT JOIN groups ON groups.id = schedules.gid "
+		"WHERE pairs_places.teacher_id=? AND datetime(schedules.day, pairs.time) > datetime('now', 'localtime') "
+		"GROUP BY pairs.id "
+		"ORDER BY schedules.day ASC, pairs.time ASC "
+		"LIMIT 1",
+		(teacher_id,)
 	).fetchone()
 
 	if not response:

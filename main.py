@@ -253,9 +253,12 @@ class Bot:
 		"""Неверный ввод"""
 		api.send(vid, self.answers['wrong_input'])
 
-	def answerPostRegistration(self, vid, keyboard_name):
+	def answerPostRegistration(self, vid, user_type):
 		"""Добро пожаловать"""
-		api.send(vid, self.answers['welcome_post_reg'], self.keyboards[keyboard_name])
+		if user_type == 1:
+			api.send(vid, self.answers['welcome_post_reg'], self.keyboards['stud_hub'])
+		else:
+			api.send(vid, self.answers['welcome_post_reg'], self.keyboards['teacher_hub'])
 
 	def answerSelectDate(self, vid, msg_id, target, for_teacher, edit=False):
 		"""Отсылает сообщение с выбором даты"""
@@ -365,9 +368,12 @@ class Bot:
 		if user_type == 1:
 			api.send(vid, self.answers['returning'], self.keyboards['stud_hub'])
 
-	def answerWhatsNext(self, vid, gid):
+	def answerWhatsNext(self, vid, target, for_teacher):
 		"""Отвечает какая пара следующая"""
-		response = database.getNextPairForGroup(gid)
+		if for_teacher:
+			response = database.getNextPairForTeacher(target)
+		else:
+			response = database.getNextPairForGroup(target)
 
 		if not response:
 			api.send(vid, self.answers['get-next-fail'])
@@ -377,20 +383,30 @@ class Bot:
 		hours_left = response['dt'] * 24
 		minutes_left = (hours_left - int(hours_left)) * 60
 
-		api.send(vid, self.answers['get-next-student'].format(
-			str(round(hours_left)) + ' ' + formatHoursGen(round(hours_left)),
-			str(round(minutes_left)) + ' ' + formatMinutesGen(round(minutes_left)),
-			response['pair_name'],
-			response['pair_place'],
-			response['pair_time']
-		))
+		if for_teacher == False:
+			api.send(vid, self.answers['get-next-student'].format(
+				str(round(hours_left)) + ' ' + formatHoursGen(round(hours_left)),
+				str(round(minutes_left)) + ' ' + formatMinutesGen(round(minutes_left)),
+				response['pair_name'],
+				response['pair_place'],
+				response['pair_time']
+			))
+		else:
+			api.send(vid, self.answers['get-next-teacher'].format(
+				str(round(hours_left)) + ' ' + formatHoursGen(round(hours_left)),
+				str(round(minutes_left)) + ' ' + formatMinutesGen(round(minutes_left)),
+				response['pair_name'],
+				response['pair_time'],
+				response['pair_group'],
+				response['pair_place']
+			))
 
-	def answerSelectTeacher(self, vid, message_id):
+	def answerSelectTeacher(self, vid, message_id, purpose):
 		"""Отправляет сообщения с клавиатурами выбора преподавателя"""
 
 		# Узнаём какие вообще есть преподаватели
 		teachers = database.getAllTeachers()
-		keyboards = self.makeTeacherSelectKeyboards(teachers, Purposes.teacher_rasp_view, message_id)
+		keyboards = self.makeTeacherSelectKeyboards(teachers, purpose, message_id)
 		amount = len(keyboards)
 
 		for index, k in enumerate(keyboards):
@@ -449,6 +465,10 @@ class Bot:
 			api.edit(vid, msg_id, message, keyboard)
 		else:
 			api.send(vid, message, keyboard)
+
+	def answerAskTeacherSignature(self, vid, question_progress):
+		"""Просит преподавателя выбрать себя из списка"""
+		api.send(vid, self.answers['question-who-are-you'].format(question_progress), self.keyboards['empty'])
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -459,13 +479,19 @@ class Bot:
 		if user['state'] == States.hub:
 			# Выбор функции бота
 			if text == 'Расписание':
-				self.answerSelectDate(vid, message_id + 1, user['gid'], False)
+				if user['type'] == 1:
+					self.answerSelectDate(vid, message_id + 1, user['gid'], False)
+				else:
+					self.answerSelectDate(vid, message_id + 1, user['teacher_id'], True)
 			if text == 'Оценки':
 				self.answerShowGrades(vid, user['id'], message_id + 1, user['journal_login'], user['journal_password'])
 			if text == 'Что дальше?':
-				self.answerWhatsNext(vid, user['gid'])
+				if user['type'] == 1:
+					self.answerWhatsNext(vid, user['gid'], False)
+				else:
+					self.answerWhatsNext(vid, user['teacher_id'], True)
 			if text == 'Где преподаватель?':
-				self.answerSelectTeacher(vid, message_id + 1)
+				self.answerSelectTeacher(vid, message_id + 1, Purposes.teacher_rasp_view)
 			if text == 'Расписание группы':
 				self.answerSelectGroupCourse(vid, message_id + 1, Purposes.stud_rasp_view, False)
 			if text == 'Звонки':
@@ -492,6 +518,10 @@ class Bot:
 			elif text == 'Нет':
 				# Пользователь - преподаватель
 				user['type'] = 2
+				user['question_progress'] += 1
+				user['state'] = States.void
+				self.answerAskTeacherSignature(vid, user['question_progress'])
+				self.answerSelectTeacher(vid, message_id + 2, Purposes.registration)
 				return True
 			else:
 				# Неверный ввод
@@ -522,7 +552,7 @@ class Bot:
 				return False
 
 			user['state'] = States.hub
-			self.answerPostRegistration(vid, 'stud_hub')
+			self.answerPostRegistration(vid, user['type'])
 			return True
 
 		if user['state'] == States.enter_login or user['state'] == States.enter_login_after_profile:
@@ -567,6 +597,7 @@ class Bot:
 				return False
 
 		if data['type'] == PayloadTypes.select_course:
+			# Выбран курс. Purpose передаётся дальше
 			self.answerSelectGroupSpec(vid, data['msg_id'], data['num'], data['purpose'])
 
 		if data['type'] == PayloadTypes.show_terms:
@@ -600,19 +631,25 @@ class Bot:
 			return True
 
 		if data['type'] == PayloadTypes.select_teacher:
+			# Удаляем прошлые сообщения
+			to_delete = ''
+			for i in range(data['msg_id'], data['msg_id'] + data['amount']):
+				to_delete += str(i) + ','
+			api.delete(to_delete)
+
 			# Выбран преподаватель... но для чего?
 			if data['purpose'] == Purposes.teacher_rasp_view:
 				# Просмотр расписания преподавателя
-
-				# Удаляем прошлые сообщения
-				to_delete = ''
-				for i in range(data['msg_id'], data['msg_id'] + data['amount']):
-					to_delete += str(i) + ','
-				api.delete(to_delete)
-
-				# Отправляем сообщение с выбором даты
 				self.answerSelectDate(vid, message_id + 1, data['teacher_id'], True)
 				return False
+
+			if data['purpose'] == Purposes.registration:
+				# Преподаватель регистрируется
+				user['teacher_id'] = data['teacher_id']
+				user['question_progress'] += 1
+				user['state'] = States.reg_can_send
+				self.answerAskIfCanSend(vid, user['question_progress'])
+				return True
 
 		if data['type'] == PayloadTypes.edit_group:
 			# Изменение группы, привязанной к пользователю
