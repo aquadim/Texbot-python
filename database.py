@@ -90,14 +90,14 @@ def start():
 
 	# Таблица pairs
 	# schedule_id - id расписания для пары
-	# time - время пары
+	# ptime - время пары
 	# sort - переменная для сортировки
 	# name - название пары
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS pairs("
 		"id INTEGER,"
 		"schedule_id INTEGER,"
-		"time DATETIME,"
+		"ptime DATETIME,"
 		"sort INTEGER,"
 		"name TEXT,"
 		"PRIMARY KEY('id'),"
@@ -225,7 +225,7 @@ def getScheduleDataForGroup(date, gid):
 def getPairsForGroup(schedule_id):
 	"""Возвращает пары для группы на заданную дату"""
 	response = cur.execute(
-		"SELECT pairs.time as pair_time, pairs.name as pair_name, group_concat(teachers.surname || ' ' || ifnull(pairs_places.place,'н/д'), '/') as pair_place FROM pairs "
+		"SELECT pairs.ptime as pair_time, pairs.name as pair_name, group_concat(teachers.surname || ' ' || ifnull(pairs_places.place,'н/д'), '/') as pair_place FROM pairs "
 		"LEFT JOIN schedules ON pairs.schedule_id = schedules.id "
 		"LEFT JOIN pairs_places ON pairs.id = pairs_places.pair_id "
 		"LEFT JOIN teachers ON teachers.id = pairs_places.teacher_id "
@@ -256,7 +256,7 @@ def getRelevantScheduleDates():
 def getScheduleDataForTeacher(date, teacher_id):
 	"""Возвращает данные пар для преподавателя"""
 	response = cur.execute(
-		"SELECT pairs.time as pair_time, pairs.name as pair_name, ifnull(pairs_places.place,'н/д') as pair_place, groups.course || groups.spec as group_name "
+		"SELECT pairs.ptime as pair_time, pairs.name as pair_name, ifnull(pairs_places.place,'н/д') as pair_place, groups.course || groups.spec as group_name "
 		"FROM pairs_places "
 			"LEFT JOIN pairs ON pairs.id = pairs_places.pair_id "
 			"LEFT JOIN schedules ON schedules.id = pairs.schedule_id "
@@ -303,17 +303,17 @@ def getNextPairForGroup(gid):
 	"""Возвращает следующую пару для группы и оставшееся до неё время в днях"""
 	response = cur.execute(
 		"SELECT "
-			"pairs.time AS pair_time, "
+			"pairs.ptime AS pair_time, "
 			"pairs.name AS pair_name, "
 			"group_concat(teachers.surname || ' ' || ifnull(pairs_places.place,'н/д'), '/') AS pair_place, "
-			"julianday(schedules.day, pairs.time) - julianday('now', 'localtime') AS dt "
+			"julianday(schedules.day, pairs.ptime) - julianday('now', 'localtime') AS dt "
 		"FROM schedules "
 			"LEFT JOIN pairs ON pairs.schedule_id = schedules.id "
 			"LEFT JOIN pairs_places ON pairs.id = pairs_places.pair_id "
 			"LEFT JOIN teachers ON teachers.id = pairs_places.teacher_id "
-		"WHERE gid=? AND datetime(schedules.day, pairs.time) > datetime('now', 'localtime') "
+		"WHERE gid=? AND datetime(schedules.day, pairs.ptime) > datetime('now', 'localtime') "
 		"GROUP BY pairs.id "
-		"ORDER BY schedules.day ASC, pairs.time ASC "
+		"ORDER BY schedules.day ASC, pairs.ptime ASC "
 		"LIMIT 1 ",
 		(gid,)
 	).fetchone()
@@ -327,18 +327,18 @@ def getNextPairForTeacher(teacher_id):
 	"""Возвращает следующую пару для группы и оставшееся до неё время в днях"""
 	response = cur.execute(
 		"SELECT "
-			"pairs.time AS pair_time,"
+			"pairs.ptime AS pair_time,"
 			"pairs.name AS pair_name,"
 			"ifnull(pairs_places.place,'н/д') AS pair_place,"
 			"groups.course || groups.spec AS pair_group,"
-			"julianday(schedules.day, pairs.time) - julianday('now', 'localtime') AS dt "
+			"julianday(schedules.day, pairs.ptime) - julianday('now', 'localtime') AS dt "
 		"FROM schedules "
 			"LEFT JOIN pairs ON pairs.schedule_id = schedules.id "
 			"LEFT JOIN pairs_places ON pairs.id = pairs_places.pair_id "
 			"LEFT JOIN groups ON groups.id = schedules.gid "
-		"WHERE pairs_places.teacher_id=? AND datetime(schedules.day, pairs.time) > datetime('now', 'localtime') "
+		"WHERE pairs_places.teacher_id=? AND datetime(schedules.day, pairs.ptime) > datetime('now', 'localtime') "
 		"GROUP BY pairs.id "
-		"ORDER BY schedules.day ASC, pairs.time ASC "
+		"ORDER BY schedules.day ASC, pairs.ptime ASC "
 		"LIMIT 1",
 		(teacher_id,)
 	).fetchone()
@@ -376,7 +376,7 @@ def cleanSchedule(schedule_id):
 
 def addPair(schedule_id, time, sort, name):
 	"""Добавляет запись пары"""
-	cur.execute("INSERT INTO pairs (schedule_id, time, sort, name) VALUES(?, ?, ?, ?)", (schedule_id, time, sort, name))
+	cur.execute("INSERT INTO pairs (schedule_id, ptime, sort, name) VALUES(?, ?, ?, ?)", (schedule_id, time, sort, name))
 	return cur.lastrowid
 
 def addPairPlace(pair_id, teacher_id, place):
@@ -392,27 +392,6 @@ def addCacheToSchedule(schedule_id, photo_id):
 	"""Добавляет photo_id к расписанию"""
 	cur.execute("UPDATE schedules SET photo_id=? WHERE id=?", (photo_id, schedule_id))
 	db.commit()
-
-
-def getPairInfo(pair_id, get_teachers_by_id):
-	"""Возвращает информацию о паре в формате: (time, name, ((teacher_id, place), (teacher_id, place), (...)))"""
-	response_main = cur.execute("SELECT time, name FROM pairs WHERE id=?", (pair_id,)).fetchone()
-
-	# Получаем данные проведении
-	# ~ if get_teachers_by_id:
-		# ~ places_query = "SELECT teacher_id as t, place as p FROM pairs_places WHERE pair_id=?"
-	# ~ else:
-		# ~ places_query =
-			# ~ "SELECT teachers_surname as t, pairs_places.place "
-			# ~ "FROM pairs_places LEFT JOIN teachers ON pairs_places.teacher_id=teachers.id"
-			# ~ "WHERE pairs_places.pair_id=?"
-	# ~ response_places = cur.execute(places_query, (pair_id,)).fetchall()
-
-	# Собираем вывод
-	output_places = []
-	for row in response_places:
-		output_places.append((row['t'], row['p']))
-	return (response_main['time'], response_main['name'], tuple(output_places))
 
 if __name__ == "__main__":
 	start()
