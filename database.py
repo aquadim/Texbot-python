@@ -151,6 +151,24 @@ def start():
 		"PRIMARY KEY('id'))"
 	)
 
+	# https://ru.stackoverflow.com/a/1537321/418543
+	# Триггер очистки записей кэширования
+	cur.execute(
+		"CREATE TRIGGER IF NOT EXISTS schedule_cleaner AFTER DELETE ON schedules "
+		"BEGIN "
+			"DELETE FROM teachers_schedule_cache WHERE teachers_schedule_cache.day = OLD.day;"
+			"DELETE FROM occupancy_cache WHERE occupancy_cache.day = OLD.day;"
+		"END"
+	)
+
+	# Триггер очистки мест пар (потому что почему то связь трёх таблиц не работает)
+	cur.execute(
+		"CREATE TRIGGER IF NOT EXISTS pairs_cleaner AFTER DELETE ON pairs "
+		"BEGIN "
+			"DELETE FROM pairs_places WHERE pairs_places.pair_id = OLD.id;"
+		"END"
+	)
+
 	db.commit()
 
 def stop():
@@ -383,9 +401,6 @@ def getIfCanCleanSchedule(schedule_id):
 def cleanSchedule(schedule_id):
 	"""Очищает расписание, затем запрещает его очищать до тех пор пока can_clean не станет 1"""
 	cur.execute("DELETE FROM pairs WHERE schedule_id=?", (schedule_id,))
-	schedule_date = cur.execute("SELECT day FROM schedules WHERE id=?", (schedule_id,)).fetchone()['day']
-	cur.execute("DELETE FROM teachers_schedule_cache WHERE date=?", (schedule_date,))
-	cur.execute("DELETE FROM occupancy_cache WHERE day=?", (schedule_date,))
 	cur.execute("UPDATE schedules SET can_clean=0, photo_id=NULL WHERE id=?", (schedule_id, ))
 	db.commit()
 
