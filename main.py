@@ -39,14 +39,15 @@ class PayloadTypes:
 	select_course		= 5 # Выбор курса
 	edit_group			= 6 # Смена группы
 	toggle_mail			= 7 # Переключение разрешения рассылок
+	edit_type			= 8 # Смена типа аккаунта
 
 class Purposes:
 	registration		= 0 # Для регистрации
 	stud_rasp_view		= 1 # Просмотр расписания группы
 	teacher_rasp_view	= 2 # Просмотр расписания преподавателя
 	edit_student		= 3 # Изменение для студента
-	edit_teacher		= 4 # Изменение для преподавателя
 	view_cabinets		= 4 # Просмотр занятости кабинетов
+	edit_type			= 5 # Изменение типа профиля
 
 class Bot:
 	def __init__(self, session, cwd, print_user):
@@ -107,7 +108,7 @@ class Bot:
 		"""Проверяет если пользователь запросил отмену. Если да - то возвращаем его в хаб"""
 		if text == 'Отмена':
 			user['state'] = States.hub
-			self.answerToHub(user['vk_id'], user['type'])
+			self.answerToHub(user['vk_id'], user['type'], self.answers['returning'])
 			return True
 		else:
 			return False
@@ -205,8 +206,8 @@ class Bot:
 				payload={'type': PayloadTypes.enter_credentials, 'after_profile': True},
 				color=credentials_color
 			)
+			output.add_line()
 
-		output.add_line()
 		if user['allows_mail'] == 1:
 			mail_text = 'Запретить рассылку'
 			mail_color = VkKeyboardColor.NEGATIVE
@@ -215,6 +216,11 @@ class Bot:
 			mail_color = VkKeyboardColor.POSITIVE
 
 		output.add_callback_button(mail_text, payload={'type': PayloadTypes.toggle_mail, 'msg_id': msg_id}, color=mail_color)
+
+		if user['type'] == 1:
+			output.add_callback_button('Стать преподавателем', payload={'type': PayloadTypes.edit_type, 'msg_id': msg_id})
+		else:
+			output.add_callback_button('Стать студентом', payload={'type': PayloadTypes.edit_type, 'msg_id': msg_id})
 
 		return output.get_keyboard()
 	# КОНЕЦ ГЕНЕРАТОРОВ КЛАВИАТУР
@@ -361,12 +367,12 @@ class Bot:
 		"""Ответ: Готово!"""
 		api.send(vid, self.answers['done'])
 
-	def answerToHub(self, vid, user_type):
+	def answerToHub(self, vid, user_type, text):
 		"""Возвращает пользователя в хаб"""
 		if user_type == 1:
-			api.send(vid, self.answers['returning'], self.keyboards['stud_hub'])
+			api.send(vid, text, self.keyboards['stud_hub'])
 		else:
-			api.send(vid, self.answers['returning'], self.keyboards['teacher_hub'])
+			api.send(vid, text, self.keyboards['teacher_hub'])
 
 	def answerWhatsNext(self, vid, target, for_teacher):
 		"""Отвечает какая пара следующая"""
@@ -452,7 +458,7 @@ class Bot:
 				message += self.answers['profile-journal-filled'].format(user['journal_login'])
 		else:
 			# Преподаватель
-			message += self.answers['profile-identifier-student'].format(database.getTeacherSurname(user['teacher_id']))
+			message += self.answers['profile-identifier-teacher'].format(database.getTeacherSurname(user['teacher_id']))
 
 		if user['allows_mail'] == 1:
 			message += self.answers['profile-mail-allowed']
@@ -468,7 +474,7 @@ class Bot:
 
 	def answerAskTeacherSignature(self, vid, question_progress):
 		"""Просит преподавателя выбрать себя из списка"""
-		api.send(vid, self.answers['question-who-are-you'].format(question_progress), self.keyboards['empty'])
+		return api.send(vid, self.answers['question-who-are-you'].format(question_progress), self.keyboards['empty'])
 
 	def answerAskCabNumber(self, vid):
 		"""Просит преподавателя написать кабинет"""
@@ -494,6 +500,14 @@ class Bot:
 			place
 		))
 		self.tasks[-1].start()
+
+	def answerAskTeacherWhenEditing(self, vid):
+		"""Просит преподавателя выбрать себя когда он переходит из студента"""
+		return api.send(vid, self.answers['question-who-are-you-no-number'])
+
+	def answerOnStartedEdit(self, vid):
+		"""Нужна для очистки клавиатуры при старте смены типа профиля"""
+		return api.send(vid, self.answers['started-editing'], self.keyboards['empty'])
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -549,8 +563,8 @@ class Bot:
 				user['type'] = 2
 				user['question_progress'] += 1
 				user['state'] = States.void
-				self.answerAskTeacherSignature(vid, user['question_progress'])
-				self.answerSelectTeacher(vid, message_id + 2, Purposes.registration)
+				msg_id = self.answerAskTeacherSignature(vid, user['question_progress'])
+				self.answerSelectTeacher(vid, msg_id + 1, Purposes.registration)
 				return True
 			else:
 				# Неверный ввод
@@ -603,7 +617,7 @@ class Bot:
 			user['journal_password'] = hashlib.sha1(bytes(text, "utf-8")).hexdigest()
 
 			self.answerDone(vid)
-			self.answerToHub(vid, user['type'])
+			self.answerToHub(vid, user['type'], self.answers['returning'])
 			if user['state'] == States.enter_password_after_profile:
 				self.answerShowProfile(vid, message_id + 1, user, False)
 
@@ -615,7 +629,7 @@ class Bot:
 			if self.checkIfCancelled(text, user):
 				return True
 			user['state'] = States.hub
-			self.answerToHub(vid, user['type'])
+			self.answerToHub(vid, user['type'], self.answers['returning'])
 			self.answerSelectDate(vid, message_id + 1, text, Purposes.view_cabinets)
 			return True
 
@@ -662,6 +676,14 @@ class Bot:
 				user['gid'] = data['gid']
 				self.answerShowProfile(vid, data['msg_id'], user, True)
 				return True
+			if data['purpose'] == Purposes.edit_type:
+				# Преподаватель становится студентом
+				user['type'] = 1
+				user['teacher_id'] = None
+				user['gid'] = data['gid']
+				user['state'] = States.hub
+				self.answerToHub(vid, 1, self.answers['welcome_post_reg'])
+				return True
 
 		if data['type'] == PayloadTypes.enter_credentials:
 			# Переводим пользователя на ввод логина и пароля дневника
@@ -693,6 +715,16 @@ class Bot:
 				self.answerAskIfCanSend(vid, user['question_progress'])
 				return True
 
+			if data['purpose'] == Purposes.edit_type:
+				# Студент становится преподавателем
+				api.delete(data['msg_id'])
+				user['gid'] = None
+				user['teacher_id'] = data['teacher_id']
+				user['state'] = States.hub
+				user['type'] = 2
+				self.answerToHub(vid, 2, self.answers['welcome_post_reg'])
+				return True
+
 		if data['type'] == PayloadTypes.edit_group:
 			# Изменение группы, привязанной к пользователю
 			if data['purpose'] == Purposes.edit_student:
@@ -706,6 +738,20 @@ class Bot:
 			else:
 				user['allows_mail'] = 1
 			self.answerShowProfile(vid, data['msg_id'], user, True)
+			return True
+
+		if data['type'] == PayloadTypes.edit_type:
+			# Изменяем тип профиля
+			user['question_progress'] = 1;
+			user['state'] = States.void
+			msg_id = self.answerOnStartedEdit(vid)
+			if user['type'] == 1:
+				# Изменяем на преподавателя. Для этого спрашиваем кто он
+				msg_id = self.answerAskTeacherWhenEditing(vid)
+				self.answerSelectTeacher(vid, msg_id + 1, Purposes.edit_type)
+			else:
+				# Изменяем на студента. Спрашиваем его курс
+				self.answerSelectGroupCourse(vid, msg_id + 1, Purposes.edit_type, False)
 			return True
 
 	def run(self):

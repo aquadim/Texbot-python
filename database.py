@@ -62,14 +62,12 @@ def start():
 	# course - номер курса
 	# spec - специальность
 	# join_year - год поступления
-	# class_teacher_id - id классрука
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS groups("
 		"id INTEGER,"
 		"course INTEGER,"
 		"spec TEXT,"
 		"join_year INTEGER,"
-		"class_teacher_id INTEGER,"
 		"PRIMARY KEY('id'))"
 	)
 
