@@ -176,11 +176,6 @@ class GradesGenerator(TableGenerator):
 				self.keyboard
 			)
 
-	def saveImage(self, image):
-		filename = __dir__+'/tmp/grades-'+str(random.randint(0,1000000))+'.png'
-		image.save(filename)
-		return filename
-
 	def generateImage(self):
 		# Авторизация в ЭЖ
 		s = requests.Session()
@@ -258,6 +253,38 @@ class GradesGenerator(TableGenerator):
 			self.theme
 		)
 		return table
+
+class CabinetGenerator(TableGenerator):
+	"""Класс для асинхронной генерации занятости кабинетов"""
+	def __init__(self, vid, public_id, theme, parent, img_name, msg_id, date, place):
+		super().__init__(vid, public_id, theme, parent, img_name)
+		self.msg_id = msg_id
+		self.date = date
+		self.place = place
+
+	def onSuccess(self):
+		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
+		database.addOccupancyRecord(self.date, self.place, self.photo_id)
+
+	def onFail(self, status):
+		if status == 1:
+			api.edit(self.vid, self.msg_id, 'Произошла ошибка')
+		elif status == 2:
+			api.edit(self.vid, self.msg_id, '(Нет данных)')
+
+	def generateImage(self):
+		data = database.getCabinets(self.date, self.place)
+		if not data:
+			return 2
+		data.insert(0, ("Время", "Кем занят"))
+		return makeTableImage(
+			data,
+			(0, 0),
+			f"Занятость кабинета {self.place} на {getDateName(self.date)}",
+			35,
+			False,
+			self.theme
+		)
 
 def applyGradient(Idraw_interface, box, color1, color2, steps = 20):
 	"""Применяет линейный горизонтальный градиент в области box, стартовым цветом color1 и конечным цветом color2"""

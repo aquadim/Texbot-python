@@ -131,11 +131,24 @@ def start():
 	cur.execute(
 		"CREATE TABLE IF NOT EXISTS teachers_schedule_cache("
 		"id INTEGER,"
-		"date DATE,"
+		"day DATE,"
 		"teacher_id INTEGER,"
 		"photo_id INTEGER,"
 		"PRIMARY KEY('id')"
 		"FOREIGN KEY('teacher_id') REFERENCES 'teachers'('id') ON DELETE CASCADE ON UPDATE CASCADE)"
+	)
+
+	# Таблица occupancy_cache - кэширование занятости кабинетов
+	# day - дата
+	# place - место
+	# photo_id - id фото
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS occupancy_cache("
+		"id INTEGER,"
+		"day DATE,"
+		"place TEXT,"
+		"photo_id INTEGER,"
+		"PRIMARY KEY('id'))"
 	)
 
 	db.commit()
@@ -275,12 +288,12 @@ def getScheduleDataForTeacher(date, teacher_id):
 def getCachedScheduleOfTeacher(date, teacher_id):
 	"""Возвращает кэшированное расписание преподавателя"""
 	return cur.execute(
-		"SELECT photo_id FROM teachers_schedule_cache WHERE date=? AND teacher_id=?", (date, teacher_id)
+		"SELECT photo_id FROM teachers_schedule_cache WHERE day=? AND teacher_id=?", (date, teacher_id)
 	).fetchone()
 
 def addCachedScheduleOfTeacher(date, teacher_id, photo_id):
 	"""Добавляет кэшированное расписание преподавателя"""
-	cur.execute("INSERT INTO teachers_schedule_cache (date,teacher_id,photo_id) VALUES(?,?,?)", (date, teacher_id, photo_id))
+	cur.execute("INSERT INTO teachers_schedule_cache (day,teacher_id,photo_id) VALUES(?,?,?)", (date, teacher_id, photo_id))
 	db.commit()
 
 # Функция: Оценки
@@ -372,7 +385,9 @@ def cleanSchedule(schedule_id):
 	cur.execute("DELETE FROM pairs WHERE schedule_id=?", (schedule_id,))
 	schedule_date = cur.execute("SELECT day FROM schedules WHERE id=?", (schedule_id,)).fetchone()['day']
 	cur.execute("DELETE FROM teachers_schedule_cache WHERE date=?", (schedule_date,))
+	cur.execute("DELETE FROM occupancy_cache WHERE day=?", (schedule_date,))
 	cur.execute("UPDATE schedules SET can_clean=0, photo_id=NULL WHERE id=?", (schedule_id, ))
+	db.commit()
 
 def addPair(schedule_id, time, sort, name):
 	"""Добавляет запись пары"""
@@ -391,6 +406,37 @@ def makeSchedulesCleanable():
 def addCacheToSchedule(schedule_id, photo_id):
 	"""Добавляет photo_id к расписанию"""
 	cur.execute("UPDATE schedules SET photo_id=? WHERE id=?", (photo_id, schedule_id))
+	db.commit()
+
+# Функция:Кабинеты
+def getCabinets(date, place):
+	"""Возвращает занятость кабинетов"""
+	response = cur.execute(
+		"SELECT pairs.ptime AS pair_time, IFNULL(teachers.surname, 'свободен') AS occupant "
+		"FROM schedules "
+		"LEFT JOIN pairs ON pairs.schedule_id = schedules.id "
+		"LEFT JOIN pairs_places ON pairs_places.pair_id = pairs.id "
+		"LEFT JOIN teachers ON teachers.id = pairs_places.teacher_id "
+		"WHERE schedules.day=? AND pairs_places.place=? "
+		"ORDER BY pairs.ptime",
+		(date, place)
+	).fetchall()
+
+	if not response:
+		return None
+
+	output = []
+	for row in response:
+		output.append((row['pair_time'], row['occupant']))
+	return output
+
+def getCachedPlaceOccupancy(date, place):
+	"""Возвращает кэшированное photo_id"""
+	return cur.execute("SELECT photo_id FROM occupancy_cache WHERE day=? AND place=?", (date, place)).fetchone()
+
+def addOccupancyRecord(date, place, photo_id):
+	"""Кэширует занятость кабинетов"""
+	cur.execute("INSERT INTO occupancy_cache (day,place,photo_id) VALUES (?, ?, ?)", (date, place, photo_id))
 	db.commit()
 
 if __name__ == "__main__":

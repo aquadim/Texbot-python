@@ -28,6 +28,7 @@ class States:
 	enter_password				= 6 # Ввод пароля
 	enter_login_after_profile	= 7 # Ввод логина, потом ставим 8
 	enter_password_after_profile= 8 # Ввод пароля, потом показываем профиль
+	enter_cab					= 9 # Ввод кабинета
 
 class PayloadTypes:
 	select_group		= 0	# Выбор группы
@@ -45,6 +46,7 @@ class Purposes:
 	teacher_rasp_view	= 2 # Просмотр расписания преподавателя
 	edit_student		= 3 # Изменение для студента
 	edit_teacher		= 4 # Изменение для преподавателя
+	view_cabinets		= 4 # Просмотр занятости кабинетов
 
 class Bot:
 	def __init__(self, session, cwd, print_user):
@@ -128,7 +130,7 @@ class Bot:
 		return kb.get_keyboard()
 
 	def makeKeyboardSelectRelevantDate(self, purpose, msg_id, target):
-		"""Возвращает клавиатуру выбора даты в которой хранится информация о выбранном преподавателе"""
+		"""Возвращает клавиатуру выбора даты"""
 		dates = database.getRelevantScheduleDates()
 		if not dates:
 			return False
@@ -260,12 +262,8 @@ class Bot:
 		else:
 			api.send(vid, self.answers['welcome_post_reg'], self.keyboards['teacher_hub'])
 
-	def answerSelectDate(self, vid, msg_id, target, for_teacher, edit=False):
+	def answerSelectDate(self, vid, msg_id, target, purpose, edit=False):
 		"""Отсылает сообщение с выбором даты"""
-		if for_teacher:
-			purpose = Purposes.teacher_rasp_view
-		else:
-			purpose = Purposes.stud_rasp_view
 		keyboard = self.makeKeyboardSelectRelevantDate(purpose, msg_id, target)
 
 		if not keyboard:
@@ -367,6 +365,8 @@ class Bot:
 		"""Возвращает пользователя в хаб"""
 		if user_type == 1:
 			api.send(vid, self.answers['returning'], self.keyboards['stud_hub'])
+		else:
+			api.send(vid, self.answers['returning'], self.keyboards['teacher_hub'])
 
 	def answerWhatsNext(self, vid, target, for_teacher):
 		"""Отвечает какая пара следующая"""
@@ -469,6 +469,31 @@ class Bot:
 	def answerAskTeacherSignature(self, vid, question_progress):
 		"""Просит преподавателя выбрать себя из списка"""
 		api.send(vid, self.answers['question-who-are-you'].format(question_progress), self.keyboards['empty'])
+
+	def answerAskCabNumber(self, vid):
+		"""Просит преподавателя написать кабинет"""
+		api.send(vid, self.answers['type-cabinet'], self.keyboards['cancel'])
+
+	def answerShowCabinetOccupancy(self, vid, date, place):
+		"""Показ занятости кабинетов"""
+		response = database.getCachedPlaceOccupancy(date, place)
+		if response:
+			# Есть кэшированное
+			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(response['photo_id']))
+			return
+
+		msg_id = api.send(vid, self.getRandomWaitText())
+		self.tasks.append(graphics.CabinetGenerator(
+			vid,
+			self.config['public_id'],
+			self.themes['rasp'],
+			self,
+			'teacher-schedule',
+			msg_id,
+			date,
+			place
+		))
+		self.tasks[-1].start()
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -480,11 +505,15 @@ class Bot:
 			# Выбор функции бота
 			if text == 'Расписание':
 				if user['type'] == 1:
-					self.answerSelectDate(vid, message_id + 1, user['gid'], False)
+					self.answerSelectDate(vid, message_id + 1, user['gid'], Purposes.stud_rasp_view)
 				else:
-					self.answerSelectDate(vid, message_id + 1, user['teacher_id'], True)
-			if text == 'Оценки':
+					self.answerSelectDate(vid, message_id + 1, user['teacher_id'], Purposes.teacher_rasp_view)
+			if text == 'Оценки' and user['type'] == 1:
 				self.answerShowGrades(vid, user['id'], message_id + 1, user['journal_login'], user['journal_password'])
+			if text == 'Кабинеты' and user['type'] == 2:
+				user['state'] = States.enter_cab
+				self.answerAskCabNumber(vid)
+				return True
 			if text == 'Что дальше?':
 				if user['type'] == 1:
 					self.answerWhatsNext(vid, user['gid'], False)
@@ -581,6 +610,15 @@ class Bot:
 			user['state'] = States.hub
 			return True
 
+		if user['state'] == States.enter_cab:
+			# Ввод кабинета
+			if self.checkIfCancelled(text, user):
+				return True
+			user['state'] = States.hub
+			self.answerToHub(vid, user['type'])
+			self.answerSelectDate(vid, message_id + 1, text, Purposes.view_cabinets)
+			return True
+
 	def handleMessageWithPayload(self, data, user, message_id):
 		"""handleMessage для сообщений с доп. данными"""
 		vid = user['vk_id']
@@ -594,6 +632,10 @@ class Bot:
 			if data['purpose'] == Purposes.teacher_rasp_view:
 				# Просмотр расписания преподавателя
 				self.answerShowScheduleForTeacher(vid, data['msg_id'], data['date'], data['target'])
+				return False
+			if data['purpose'] == Purposes.view_cabinets:
+				# Просмотр занятости кабинетов
+				self.answerShowCabinetOccupancy(vid, data['date'], data['target'])
 				return False
 
 		if data['type'] == PayloadTypes.select_course:
@@ -614,7 +656,7 @@ class Bot:
 				self.answerAskIfCanSend(vid, user['question_progress'])
 				return True
 			if data['purpose'] == Purposes.stud_rasp_view:
-				self.answerSelectDate(vid, data['msg_id'], data['gid'], False, True)
+				self.answerSelectDate(vid, data['msg_id'], data['gid'], Purposes.stud_rasp_view, True)
 				return False
 			if data['purpose'] == Purposes.edit_student:
 				user['gid'] = data['gid']
@@ -640,7 +682,7 @@ class Bot:
 			# Выбран преподаватель... но для чего?
 			if data['purpose'] == Purposes.teacher_rasp_view:
 				# Просмотр расписания преподавателя
-				self.answerSelectDate(vid, message_id + 1, data['teacher_id'], True)
+				self.answerSelectDate(vid, message_id + 1, data['teacher_id'], Purposes.teacher_rasp_view, True)
 				return False
 
 			if data['purpose'] == Purposes.registration:

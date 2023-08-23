@@ -152,6 +152,7 @@ def parseDocument(__dir__):
 		print2(f'Таблица #{table_index} готова!', 'green')
 	database.makeSchedulesCleanable()
 	database.db.commit()
+	database.db.close()
 
 	end_time = time.time()
 	print(f'Время работы скрипта: {end_time - start_time}')
