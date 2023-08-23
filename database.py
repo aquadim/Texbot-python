@@ -132,8 +132,19 @@ def start():
 		"day DATE,"
 		"teacher_id INTEGER,"
 		"photo_id INTEGER,"
-		"PRIMARY KEY('id')"
+		"PRIMARY KEY('id'),"
 		"FOREIGN KEY('teacher_id') REFERENCES 'teachers'('id') ON DELETE CASCADE ON UPDATE CASCADE)"
+	)
+
+	# Таблица stats
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS stats("
+		"id INTEGER,"
+		"caller_gid INTEGER,"
+		"caller_teacher INTEGER,"
+		"func_id INTEGER,"
+		"date_create DATETIME,"
+		"PRIMARY KEY('id'))"
 	)
 
 	# Таблица occupancy_cache - кэширование занятости кабинетов
@@ -146,6 +157,16 @@ def start():
 		"day DATE,"
 		"place TEXT,"
 		"photo_id INTEGER,"
+		"PRIMARY KEY('id'))"
+	)
+
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS mails ("
+		"id INTEGER,"
+		"target TEXT,"
+		"message TEXT,"
+		"author INTEGER,"
+		"date_create DATETIME,"
 		"PRIMARY KEY('id'))"
 	)
 
@@ -451,6 +472,37 @@ def addOccupancyRecord(date, place, photo_id):
 	"""Кэширует занятость кабинетов"""
 	cur.execute("INSERT INTO occupancy_cache (day,place,photo_id) VALUES (?, ?, ?)", (date, place, photo_id))
 	db.commit()
+
+def addMailRecord(user_id):
+	"""Добавляет запись о рассылке"""
+	cur.execute("INSERT INTO mails (author, date_create) VALUES(?,DATETIME('now', 'localtime'))", (user_id,))
+	db.commit()
+
+def getMostRecentMailRecord(user_id):
+	"""Возвращает id самой последней рассылки над которой работал пользователь"""
+	return cur.execute("SELECT id FROM mails WHERE author=? ORDER BY date_create DESC LIMIT 1", (user_id,)).fetchone()['id']
+
+def updateMail(mail_id, field, value):
+	"""Обновляет поле рассылки"""
+	cur.execute("UPDATE mails SET "+field+"=? WHERE id=?", (value, mail_id))
+	db.commit()
+
+def deleteMail(mail_id):
+	"""Удаляет запись рассылки"""
+	cur.execute("DELETE FROM mails WHERE id=?", (mail_id,))
+	db.commit()
+
+def getMailInfo(mail_id):
+	"""Возвращает данные рассылки, необходимые для... рассылки"""
+	return cur.execute("SELECT target, message FROM mails WHERE id=?", (mail_id,)).fetchone()
+
+def getUsersByMask(mask):
+	"""Возвращает пользователей, которым можно отправить сообщение"""
+	return cur.execute(
+		'SELECT vk_id FROM users'
+		'WHERE gid IN (SELECT id FROM groups WHERE (course||spec) LIKE ?) AND allows_mail=1',
+		(mask.replace("*", "%"),)
+	).fetchall()
 
 if __name__ == "__main__":
 	start()

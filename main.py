@@ -29,6 +29,9 @@ class States:
 	enter_login_after_profile	= 7 # Ввод логина, потом ставим 8
 	enter_password_after_profile= 8 # Ввод пароля, потом показываем профиль
 	enter_cab					= 9 # Ввод кабинета
+	admin						= 10# Выбор функции администрации
+	mail_input_target			= 11# Ввод цели рассылки
+	mail_input_message			= 12# Ввод текста рассылки
 
 class PayloadTypes:
 	select_group		= 0	# Выбор группы
@@ -40,6 +43,7 @@ class PayloadTypes:
 	edit_group			= 6 # Смена группы
 	toggle_mail			= 7 # Переключение разрешения рассылок
 	edit_type			= 8 # Смена типа аккаунта
+	unsubscribe			= 9 # Запрет рассылки
 
 class Purposes:
 	registration		= 0 # Для регистрации
@@ -374,6 +378,10 @@ class Bot:
 		else:
 			api.send(vid, text, self.keyboards['teacher_hub'])
 
+	def answerToAdminHub(self, vid, text):
+		"""Возвращает пользователя в хаб администрации"""
+		api.send(vid, text, self.keyboards['admin-hub'])
+
 	def answerWhatsNext(self, vid, target, for_teacher):
 		"""Отвечает какая пара следующая"""
 		if for_teacher:
@@ -508,6 +516,22 @@ class Bot:
 	def answerOnStartedEdit(self, vid):
 		"""Нужна для очистки клавиатуры при старте смены типа профиля"""
 		return api.send(vid, self.answers['started-editing'], self.keyboards['empty'])
+
+	def answerShowAdminPanel(self, vid):
+		"""Показ панели администрации"""
+		api.send(vid, self.answers['admin-welcome'], self.keyboards['admin-hub'])
+
+	def answerAskMailTarget(self, vid):
+		"""Просит ввести цель рассылки"""
+		api.send(vid, self.answers['enter-mail-target'], self.keyboards['cancel'])
+
+	def answerAskMailMessage(self, vid):
+		"""Просит ввести текст рассылки"""
+		api.send(vid, self.answers['enter-mail-message'], self.keyboards['cancel'])
+
+	def answerMailDisabled(self, vid):
+		"""Уведомляет об отключении рассылки"""
+		api.send(vk, self.answers['mail-disabled'])
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -543,6 +567,12 @@ class Bot:
 				self.answerShowProfile(vid, message_id + 1, user, False)
 			if text == '.':
 				self.answerUpdateHub(vid, user['type'])
+			if text == 'admin' and user['admin']:
+				# "Оно находится прямо рядом с тобой и ты его даже не замечаешь" - Майк, из сериала "Очень странные дела"
+				user['state'] = States.admin
+				self.answerShowAdminPanel(vid)
+				return True
+
 			return False
 
 		if user['state'] == States.void:
@@ -631,6 +661,55 @@ class Bot:
 			user['state'] = States.hub
 			self.answerToHub(vid, user['type'], self.answers['returning'])
 			self.answerSelectDate(vid, message_id + 1, text, Purposes.view_cabinets)
+			return True
+
+		if user['state'] == States.admin:
+			if text == 'Выход':
+				user['state'] = States.hub
+				self.answerToHub(vid, user['type'], self.answers['returning'])
+				return True
+
+			if text == 'Рассылка':
+				user['state'] = States.mail_input_target
+				database.addMailRecord(user['id'])
+				self.answerAskMailTarget(vid)
+				return True
+
+		if user['state'] == States.mail_input_target:
+			mail_id = database.getMostRecentMailRecord(user['id'])
+			if text == 'Отмена':
+				user['state'] = States.admin
+				self.answerToAdminHub(vid, self.answers['returning'])
+				database.deleteMail(mail_id)
+				return True
+
+			user['state'] = States.mail_input_message
+			database.updateMail(mail_id, 'target', text)
+			self.answerAskMailMessage(vid)
+			return True
+
+		if user['state'] == States.mail_input_message:
+			mail_id = database.getMostRecentMailRecord(user['id'])
+			user['state'] = States.admin
+
+			if text == 'Отмена':
+				database.deleteMail(mail_id)
+				self.answerToAdminHub(vid, self.answers['returning'])
+			else:
+				database.updateMail(mail_id, 'message', text)
+				api.tgAlert(
+					'Автор рассылки: https://vk.com/id'+str(user['vk_id'])+'\nТекст: '+text,
+					'Создана рассылка в техботе'
+				)
+
+				mail_info = database.getMailInfo(mail_id)
+				mail_users = database.getUsersByMask(mail_info['target'])
+				api.massSend(
+					mail_users,
+					mail_info['message'],
+					self.keyboards['unsubscribe']
+				)
+				self.answerToAdminHub(vid, self.answers['mail-saved'].format(len(mail_users)))
 			return True
 
 	def handleMessageWithPayload(self, data, user, message_id):
@@ -754,6 +833,11 @@ class Bot:
 				self.answerSelectGroupCourse(vid, msg_id + 1, Purposes.edit_type, False)
 			return True
 
+		if data['type'] == PayloadTypes.unsubscribe:
+			user['allows_mail'] = 0
+			self.answerMailDisabled(vid)
+			return True
+
 	def run(self):
 		"""Принимает и обрабатывает входящие события"""
 		print2("Бот онлайн", 'green')
@@ -784,6 +868,7 @@ class Bot:
 					# Первый запуск
 					self.answerOnMeet(vid)
 					database.createUser(vid)
+					api.tgAlert('https://vk.com/id'+str(vid), 'Новый пользователь техбота')
 				else:
 					# Не первый запуск
 					if 'payload' in event.obj.message:
