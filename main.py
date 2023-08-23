@@ -531,7 +531,7 @@ class Bot:
 
 	def answerMailDisabled(self, vid):
 		"""Уведомляет об отключении рассылки"""
-		api.send(vk, self.answers['mail-disabled'])
+		api.send(vid, self.answers['mail-disabled'])
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -698,7 +698,7 @@ class Bot:
 			else:
 				database.updateMail(mail_id, 'message', text)
 				api.tgAlert(
-					'Автор рассылки: https://vk.com/id'+str(user['vk_id'])+'\nТекст: '+text,
+					'Автор рассылки: https://vk.com/id'+str(user['vk_id'])+'. Текст: '+text,
 					'Создана рассылка в техботе'
 				)
 

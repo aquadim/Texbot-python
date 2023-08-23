@@ -109,9 +109,9 @@ def tgAlert(text, prefix):
 		return
 	text = '<pre>'+prefix+'</pre>'+text
 	try:
-		requests.get('https://api.telegram.org/bot{0}/sendMessage?chat_id={1}&text={2}&parse_mode=html'.format(TG_REPORT_TOKEN, TG_REPORT_ID, text))
+		r = requests.get('https://api.telegram.org/bot{0}/sendMessage?chat_id={1}&text={2}&parse_mode=html'.format(TG_REPORT_TOKEN, TG_REPORT_ID, text))
 	except:
-		print2('Не удалось отправить уведомление об ошибке', 'red')
+		print2('Не удалось отправить уведомление', 'red')
 
 def massSend(users, message, keyboard):
 	"""Отправляет рассылку"""
@@ -120,14 +120,14 @@ def massSend(users, message, keyboard):
 	i = 0
 
 	while i < len(users):
-		current_ids += users[messages_sent]['vk_id'] + ','
+		current_ids += str(users[messages_sent]['vk_id']) + ','
 		i += 1
 
 		messages_sent += 1
 		if messages_sent == 100:
-			api.messages.send(user_ids=current_ids, message=message, keyboard=keyboard)
+			API.messages.send(user_ids=current_ids, message=message, keyboard=keyboard, random_id=0)
 			current_ids = ''
 			messages_sent = 0
 
 	if messages_sent > 0:
-		api.messages.send(user_ids=current_ids, message=message, keyboard=keyboard)
+		API.messages.send(user_ids=current_ids, message=message, keyboard=keyboard, random_id=0)

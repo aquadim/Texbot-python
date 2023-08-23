@@ -499,7 +499,7 @@ def getMailInfo(mail_id):
 def getUsersByMask(mask):
 	"""Возвращает пользователей, которым можно отправить сообщение"""
 	return cur.execute(
-		'SELECT vk_id FROM users'
+		'SELECT vk_id FROM users '
 		'WHERE gid IN (SELECT id FROM groups WHERE (course||spec) LIKE ?) AND allows_mail=1',
 		(mask.replace("*", "%"),)
 	).fetchall()
