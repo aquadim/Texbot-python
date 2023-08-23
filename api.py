@@ -97,7 +97,8 @@ def tgErrorReport(text):
 	"""Уведомляет кого то об ошибке"""
 	if not TG_REPORT:
 		return
+	text = '<pre>Ошибка в техботе </pre>' + text
 	try:
-		requests.get('https://api.telegram.org/bot{0}/sendMessage?chat_id={1}&text={2}'.format(TG_REPORT_TOKEN, TG_REPORT_ID, text))
+		requests.get('https://api.telegram.org/bot{0}/sendMessage?chat_id={1}&text={2}&parse_mode=html'.format(TG_REPORT_TOKEN, TG_REPORT_ID, text))
 	except:
 		print2('Не удалось отправить уведомление об ошибке', 'red')
