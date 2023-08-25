@@ -76,7 +76,7 @@ class Bot:
 			self.themes = json.load(f)
 
 		# ВКонтакте
-		self.longpoll = VkBotLongPoll(session, group_id=str(-1 * self.config['public_id']))
+		self.longpoll = VkBotLongPoll(session, group_id=public_id)
 
 	def getRandomWaitText(self):
 		return self.answers['wait'+str(random.randint(0,7))]
@@ -173,11 +173,11 @@ class Bot:
 			text = text.replace('{%dataset_alltime%}', dataset_alltime)
 			text = text.replace('{%dataset_lastmonth%}', dataset_lastmonth)
 			text = text.replace('{%groups%}', groups_HTML)
-			with open(self.dir+'/tmp/stats.html', 'w', encoding='utf-8') as out:
-				out.write(text)
 
-		# Загружаем документ
-		api.uploadDocument(self.dir+'/tmp/stats.html')
+			path = self.dir+'/tmp/stats.txt'
+			with open(path, 'w', encoding='utf-8') as out:
+				out.write(text)
+			return path
 
 	# ГЕНЕРАТОРЫ КЛАВИАТУР
 	def makeKeyboardSelectGroup(self, data, msg_id, purpose):
@@ -356,7 +356,7 @@ class Bot:
 
 		# Расписание кэшировано?
 		if response['photo_id']:
-			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(response['photo_id']))
+			api.send(vid, None, None, 'photo-'+str(self.public_id)+'_'+str(response['photo_id']))
 			return
 
 		# Прикол для Виталия :P
@@ -367,7 +367,7 @@ class Bot:
 		msg_id = api.send(vid, self.getRandomWaitText())
 		self.tasks.append(graphics.GroupScheduleGenerator(
 			vid,
-			self.config['public_id'],
+			self.public_id,
 			self.themes['rasp'],
 			self,
 			'group-schedule',
@@ -382,13 +382,13 @@ class Bot:
 		response = database.getCachedScheduleOfTeacher(date, teacher_id)
 		if response:
 			# Есть кэшированное
-			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(response['photo_id']))
+			api.send(vid, None, None, 'photo'+str(self.public_id)+'_'+str(response['photo_id']))
 			return
 		msg_id = api.send(vid, self.getRandomWaitText())
 
 		self.tasks.append(graphics.TeacherScheduleGenerator(
 			vid,
-			self.config['public_id'],
+			self.public_id,
 			self.themes['rasp'],
 			self,
 			'teacher-schedule',
@@ -403,13 +403,13 @@ class Bot:
 		# Проверяем если пользователь уже получал оценки
 		photo_id = database.getMostRecentGradesImage(user_id)
 		if photo_id:
-			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(photo_id))
+			api.send(vid, None, None, 'photo'+str(self.public_id)+'_'+str(photo_id))
 		else:
 			api.send(vid, self.getRandomWaitText())
 			# Запускаем процесс сбора оценок
 			self.tasks.append(graphics.GradesGenerator(
 				vid,
-				self.config['public_id'],
+				self.public_id,
 				self.themes['grades'],
 				self,
 				'grades',
@@ -555,13 +555,13 @@ class Bot:
 		response = database.getCachedPlaceOccupancy(date, place)
 		if response:
 			# Есть кэшированное
-			api.send(vid, None, None, 'photo'+str(self.config['public_id'])+'_'+str(response['photo_id']))
+			api.send(vid, None, None, 'photo'+str(self.public_id)+'_'+str(response['photo_id']))
 			return
 
 		msg_id = api.send(vid, self.getRandomWaitText())
 		self.tasks.append(graphics.CabinetGenerator(
 			vid,
-			self.config['public_id'],
+			self.public_id,
 			self.themes['rasp'],
 			self,
 			'teacher-schedule',
@@ -594,6 +594,11 @@ class Bot:
 	def answerMailDisabled(self, vid):
 		"""Уведомляет об отключении рассылки"""
 		api.send(vid, self.answers['mail-disabled'])
+
+	def answerShowStats(self, vid, file_id):
+		"""Отправляет файл со статистикой"""
+		api.send(vid, self.answers['stats'], None, 'doc'+str(vid)+'_'+str(file_id))
+
 	# КОНЕЦ ОТВЕТОВ БОТА
 
 	def handleMessage(self, text, user, message_id):
@@ -738,8 +743,11 @@ class Bot:
 				return True
 
 			if text == 'Статистика':
-				# Популярность функций за всё время у всех групп
-				self.generateHtmlStats()
+				# Генерируем HTML
+				path = self.generateHtmlStats()
+				# Загружаем документ
+				doc_id = api.uploadDocument(vid, path)
+				self.answerShowStats(vid, doc_id)
 
 		if user['state'] == States.mail_input_target:
 			mail_id = database.getMostRecentMailRecord(user['id'])
@@ -998,7 +1006,7 @@ def main(args):
 			printUsage(arg, 1)
 
 	vk_token = getArg('--bot-token', args)
-	public_id = getArg('--public-id', args)
+	public_id = int(getArg('--public-id', args))
 
 	tg_report_token = getArg('--tg-report-token', args)
 	tg_report_id = getArg('--tg-report-id', args)
@@ -1007,7 +1015,7 @@ def main(args):
 	database.start()
 
 	# Авторизация ВКонтакте
-	session = api.start(vk_token, public_id, tg_report_token, tg_report_id)
+	session = api.start(vk_token, tg_report_token, tg_report_id)
 
 	# Инициализация бота
 	__dir__ = os.path.dirname(os.path.abspath(__file__))

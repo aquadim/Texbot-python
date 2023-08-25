@@ -6,18 +6,16 @@ import vk_api
 import requests
 import json
 
-def start(bot_token, public_id, tg_report_token, tg_report_id):
+def start(bot_token, tg_report_token, tg_report_id):
 	"""Авторизуется во ВКонтакте, сохраняет несколько глобальных переменных"""
 
 	# Авторизуемся
 	global API
 	global PHOTOUPLOAD_URL
-	global FILEUPLOAD_URL
 
 	session = vk_api.VkApi(token=bot_token)
 	API = session.get_api()
 	PHOTOUPLOAD_URL = API.photos.getMessagesUploadServer()["upload_url"]
-	FILEUPLOAD_URL = API.docs.getMessagesUploadServer(peer_id=public_id)['upload_url']
 
 	# Уведомления в телеграм об ошибках
 	global TG_REPORT_TOKEN
@@ -78,20 +76,19 @@ def uploadImage(image_path):
 	# Получение id изображения
 	return API.photos.saveMessagesPhoto(server=response["server"], photo=response["photo"], hash=response["hash"])[0]["id"]
 
-def uploadDocument(path):
+def uploadDocument(peer_id, path):
 	"""Загружает файл с диска и получает id для параметра attachment"""
+	url = API.docs.getMessagesUploadServer(peer_id=peer_id)['upload_url']
 	try:
 		with open(path, 'rb') as f:
-			response = requests.post(FILEUPLOAD_URL, files={"file": f})
+			response = requests.post(url, files={"file": (path, f.read(), 'text\\plain')})
+		if not response.ok:
+			return
 	except FileNotFoundError:
 		return
 
-	if not response.ok:
-		return
-
-	response = API.docs.save(response)
-	print(response)
-
+	uploaded_info = json.loads(response.content)['file']
+	return API.docs.save(file=uploaded_info)['doc']['id']
 
 def answerCallback(event_id, vid, peer_id):
 	"""Отвечает на callback кнопку"""
