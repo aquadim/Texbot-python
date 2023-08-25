@@ -32,8 +32,8 @@ def start(bot_token, public_id, tg_report_token, tg_report_id):
 			print2('Указан tg-report-token, но не указан --tg-report-id', 'red')
 			exit()
 
-		TG_REPORT_TOKEN = args[args.index('--tg-report-token') + 1]
-		TG_REPORT_ID = args[args.index('--tg-report-id') + 1]
+		TG_REPORT_TOKEN = tg_report_token
+		TG_REPORT_ID = tg_report_id
 
 	return session
 
