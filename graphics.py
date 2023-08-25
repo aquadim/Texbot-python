@@ -58,7 +58,7 @@ class TableGenerator(threading.Thread):
 				self.onSuccess()
 			else:
 				self.onFail(status)
-		except:
+		except Exception as e:
 			self.has_exception = True
 			self.exception = e
 			logging.exception('ошибка в TableGenerator при завершении процесса')
@@ -102,7 +102,7 @@ class ScheduleGenerator(TableGenerator):
 		self.date = date
 
 	def onSuccess(self):
-		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
+		api.edit(self.vid, self.msg_id, None, None, 'photo-'+str(self.public_id)+'_'+str(self.photo_id))
 
 	def onFail(self, status):
 		if status == 1:
@@ -163,7 +163,7 @@ class GradesGenerator(TableGenerator):
 		self.user_id = user_id
 
 	def onSuccess(self):
-		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
+		api.edit(self.vid, self.msg_id, None, None, 'photo-'+str(self.public_id)+'_'+str(self.photo_id))
 
 	def onFail(self, status):
 		if status == 1:
@@ -263,7 +263,7 @@ class CabinetGenerator(TableGenerator):
 		self.place = place
 
 	def onSuccess(self):
-		api.edit(self.vid, self.msg_id, None, None, 'photo'+str(self.public_id)+'_'+str(self.photo_id))
+		api.edit(self.vid, self.msg_id, None, None, 'photo-'+str(self.public_id)+'_'+str(self.photo_id))
 		database.addOccupancyRecord(self.date, self.place, self.photo_id)
 
 	def onFail(self, status):

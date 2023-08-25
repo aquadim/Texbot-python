@@ -544,5 +544,14 @@ def getStatsByGroups():
 		"GROUP BY groups.id, stats.id"
 	).fetchall()
 
+def addStatRecord(user_gid, user_type, fn_id):
+	if user_type != 1:
+		user_gid = None
+	cur.execute(
+		'INSERT INTO stats (caller_gid, func_id, date_create) VALUES(?, ?, DATETIME("now", "localtime"))',
+		(user_gid, fn_id)
+	)
+	db.commit()
+
 if __name__ == "__main__":
 	start()

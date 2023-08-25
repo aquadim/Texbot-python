@@ -61,20 +61,20 @@ def delete(msg_id):
 	except:
 		pass
 
-def uploadImage(image_path):
+def uploadImage(path):
 	"""Загружает изображение с диска и получает id загрузки для параметра attachment"""
 	# Чтение данных
 	try:
-		with open(image_path, 'rb') as f:
-			payload = {"file": (image_path, f.read(), 'image\\png')}
+		with open(path, 'rb') as f:
+			response = requests.post(PHOTOUPLOAD_URL, files={"file": (path, f.read(), 'image\\png')})
+		if not response.ok:
+			return
 	except FileNotFoundError:
 		return None
 
-	# Загрузка данных изображения
-	response = json.loads(requests.post(PHOTOUPLOAD_URL, files=payload).content)
-
-	# Получение id изображения
-	return API.photos.saveMessagesPhoto(server=response["server"], photo=response["photo"], hash=response["hash"])[0]["id"]
+	photo_info = json.loads(response.content)
+	save = API.photos.saveMessagesPhoto(photo=photo_info['photo'], server=photo_info['server'], hash=photo_info['hash'])
+	return save[0]['id']
 
 def uploadDocument(peer_id, path):
 	"""Загружает файл с диска и получает id для параметра attachment"""
@@ -104,7 +104,7 @@ def tgErrorReport(text):
 		return
 	text = '<pre>Ошибка в техботе </pre>' + text
 	try:
-		requests.get('https://api.telegram.org/bot{0}/sendMessage?chat_id={1}&text={2}&parse_mode=html'.format(TG_REPORT_TOKEN, TG_REPORT_ID, text))
+		r=requests.get('https://api.telegram.org/bot{0}/sendMessage?chat_id={1}&text={2}&parse_mode=html'.format(TG_REPORT_TOKEN, TG_REPORT_ID, text))
 	except:
 		print2('Не удалось отправить уведомление об ошибке', 'red')
 

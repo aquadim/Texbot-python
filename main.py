@@ -382,7 +382,7 @@ class Bot:
 		response = database.getCachedScheduleOfTeacher(date, teacher_id)
 		if response:
 			# Есть кэшированное
-			api.send(vid, None, None, 'photo'+str(self.public_id)+'_'+str(response['photo_id']))
+			api.send(vid, None, None, 'photo-'+str(self.public_id)+'_'+str(response['photo_id']))
 			return
 		msg_id = api.send(vid, self.getRandomWaitText())
 
@@ -403,7 +403,7 @@ class Bot:
 		# Проверяем если пользователь уже получал оценки
 		photo_id = database.getMostRecentGradesImage(user_id)
 		if photo_id:
-			api.send(vid, None, None, 'photo'+str(self.public_id)+'_'+str(photo_id))
+			api.send(vid, None, None, 'photo-'+str(self.public_id)+'_'+str(photo_id))
 		else:
 			api.send(vid, self.getRandomWaitText())
 			# Запускаем процесс сбора оценок
@@ -555,7 +555,7 @@ class Bot:
 		response = database.getCachedPlaceOccupancy(date, place)
 		if response:
 			# Есть кэшированное
-			api.send(vid, None, None, 'photo'+str(self.public_id)+'_'+str(response['photo_id']))
+			api.send(vid, None, None, 'photo-'+str(self.public_id)+'_'+str(response['photo_id']))
 			return
 
 		msg_id = api.send(vid, self.getRandomWaitText())
@@ -613,23 +613,30 @@ class Bot:
 					self.answerSelectDate(vid, message_id + 1, user['gid'], Purposes.stud_rasp_view)
 				else:
 					self.answerSelectDate(vid, message_id + 1, user['teacher_id'], Purposes.teacher_rasp_view)
+				database.addStatRecord(user['gid'], user['type'], 1)
 			if text == 'Оценки' and user['type'] == 1:
 				self.answerShowGrades(vid, user['id'], message_id + 1, user['journal_login'], user['journal_password'])
+				database.addStatRecord(user['gid'], user['type'], 2)
 			if text == 'Кабинеты' and user['type'] == 2:
 				user['state'] = States.enter_cab
 				self.answerAskCabNumber(vid)
+				database.addStatRecord(user['gid'], user['type'], 7)
 				return True
 			if text == 'Что дальше?':
 				if user['type'] == 1:
 					self.answerWhatsNext(vid, user['gid'], False)
 				else:
 					self.answerWhatsNext(vid, user['teacher_id'], True)
+				database.addStatRecord(user['gid'], user['type'], 3)
 			if text == 'Где преподаватель?':
 				self.answerSelectTeacher(vid, message_id + 1, Purposes.teacher_rasp_view)
+				database.addStatRecord(user['gid'], user['type'], 4)
 			if text == 'Расписание группы':
 				self.answerSelectGroupCourse(vid, message_id + 1, Purposes.stud_rasp_view, False)
+				database.addStatRecord(user['gid'], user['type'], 5)
 			if text == 'Звонки':
 				self.answerBells(vid)
+				database.addStatRecord(user['gid'], user['type'], 6)
 			if text == 'Профиль':
 				self.answerShowProfile(vid, message_id + 1, user, False)
 			if text == '.':
@@ -857,7 +864,7 @@ class Bot:
 			# Выбран преподаватель... но для чего?
 			if data['purpose'] == Purposes.teacher_rasp_view:
 				# Просмотр расписания преподавателя
-				self.answerSelectDate(vid, message_id + 1, data['teacher_id'], Purposes.teacher_rasp_view, True)
+				self.answerSelectDate(vid, None, data['teacher_id'], Purposes.teacher_rasp_view, False)
 				return False
 
 			if data['purpose'] == Purposes.registration:
