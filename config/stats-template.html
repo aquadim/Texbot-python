@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<style>.chart-container{width:80%; margin:auto;}.chart-title{text-align:center;font-family:sans-serif}</style>
+	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+	<h1 class='chart-title'>Статистика использования функций</h1>
+	<div class='chart-container'><canvas id='functions-alltime'></canvas></div>
+	<script>
+	const ctx = document.getElementById('functions-alltime');
+
+	new Chart(ctx, {
+		type: 'bar',
+		data: {
+			labels: {%labels_string%},
+			datasets: [
+				{label: 'Количество использований за всё время', data:{%dataset_alltime%}},
+				{label: 'Количество использований за последний месяц',data:{%dataset_lastmonth%}}
+			]
+		},
+		options: {
+			scales: {y: {beginAtZero: true, ticks: {precision: 0}}}
+		}
+	});
+	</script>
+	{%groups%}
+</body>
+</html>

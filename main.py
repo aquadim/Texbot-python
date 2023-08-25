@@ -54,11 +54,12 @@ class Purposes:
 	edit_type			= 5 # Изменение типа профиля
 
 class Bot:
-	def __init__(self, session, cwd, print_user):
+	def __init__(self, session, directory, print_user, public_id):
 		"""Инициализация"""
-		self.dir = cwd
+		self.dir = directory
 		self.tasks = []
 		self.print_user = print_user
+		self.public_id = public_id
 
 		# Загрузка ответов
 		with open(self.dir + "/config/answers.json", 'r', encoding='utf-8') as f:
@@ -69,10 +70,6 @@ class Bot:
 			self.keyboards = json.load(f)
 		for key in self.keyboards:
 			self.keyboards[key] = json.dumps(self.keyboards[key])
-
-		# Загрузка настроек
-		with open(self.dir + "/config/config.json", 'r', encoding='utf-8') as f:
-			self.config = json.load(f)
 
 		# Загрузка тем
 		with open(self.dir + '/config/themes.json', 'r', encoding='utf-8') as f:
@@ -116,6 +113,71 @@ class Bot:
 			return True
 		else:
 			return False
+
+	def generateHtmlStats(self):
+		"""Генерирует html-файл со статистикой"""
+		data_alltime = database.getStatsFunctionUsageAllTime()
+		data_lastmonth = database.getStatsFunctionUsageLastMonth()
+
+		labels_string = '' # Легенда
+		dataset_alltime = '' # Набор данных: функции за всё время
+		dataset_lastmonth = '' # Набор данных: функции за последний месяц
+		existing_functions = {}
+
+		for index in range(len(data_alltime)):
+			labels_string += '"'+data_alltime[index]['name']+'",'
+			dataset_alltime += str(data_alltime[index]['cnt'])+','
+			dataset_lastmonth += str(data_lastmonth[index]['cnt'])+','
+
+			existing_functions[data_alltime[index]['fn_id']] = data_alltime[index]['name']
+
+		labels_string = '['+labels_string+']'
+		dataset_alltime = '['+dataset_alltime+']'
+		dataset_lastmonth = '['+dataset_lastmonth+']'
+
+		# Статистика по группам
+		data_by_groups = database.getStatsByGroups()
+		by_groups={}
+		for row in data_by_groups:
+			if not row['gname'] in by_groups.keys():
+				by_groups[row['gname']] = {key:0 for key in existing_functions}
+
+			if row['stat_id'] == None:
+				continue
+
+			by_groups[row['gname']][row['stat_id']] = row['cnt']
+
+		groups_HTML = ''
+		for item in by_groups:
+			dataset_string = ''
+			dataset_legend = ''
+			for stat in by_groups[item]:
+				dataset_legend += "'"+existing_functions[stat]+"',"
+				dataset_string += str(by_groups[item][stat])+','
+
+			groups_HTML += "\
+			<h1 class='chart-title'>Статистика использования функций группой {0}</h1>\
+			<div class='chart-container'>\
+				<canvas id='functions-{0}'></canvas>\
+			</div>\
+			<script>\
+			new Chart(\
+				document.getElementById('functions-{0}'),\
+				{{type:'bar',data:{{labels:[{1}],datasets:[{{label:'Количество использований за всё время',data:[{2}]}},]}},\
+				options: {{scales: {{y: {{beginAtZero: true, ticks: {{precision: 0}}}}}}}}}});\
+			</script>".format(item, dataset_legend, dataset_string)
+
+		with open(self.dir+'/config/stats-template.html', 'r', encoding='utf-8') as f:
+			text = f.read()
+			text = text.replace('{%labels_string%}', labels_string)
+			text = text.replace('{%dataset_alltime%}', dataset_alltime)
+			text = text.replace('{%dataset_lastmonth%}', dataset_lastmonth)
+			text = text.replace('{%groups%}', groups_HTML)
+			with open(self.dir+'/tmp/stats.html', 'w', encoding='utf-8') as out:
+				out.write(text)
+
+		# Загружаем документ
+		api.uploadDocument(self.dir+'/tmp/stats.html')
 
 	# ГЕНЕРАТОРЫ КЛАВИАТУР
 	def makeKeyboardSelectGroup(self, data, msg_id, purpose):
@@ -675,6 +737,10 @@ class Bot:
 				self.answerAskMailTarget(vid)
 				return True
 
+			if text == 'Статистика':
+				# Популярность функций за всё время у всех групп
+				self.generateHtmlStats()
+
 		if user['state'] == States.mail_input_target:
 			mail_id = database.getMostRecentMailRecord(user['id'])
 			if text == 'Отмена':
@@ -896,22 +962,56 @@ class Bot:
 
 				api.answerCallback(event_id, vid, event.obj.peer_id)
 
+def printUsage(problem_arg, problem_type):
+	"""Выводит использование скрипта и все доступные параметры"""
+	if problem_type == 1:
+		print2("Отсутствует параметр " + problem_arg, 'red')
+	elif problem_type == 2:
+		print2("Отсутствует значение у параметра " + problem_arg, 'red')
+	print("Использование: python main.py --bot-token <bot token> --public-id <public id> [--print-user] [--tg-report-token <token for reports>] [--tg-report-id <id for reports>]")
+	print("--bot-token: Токен ВК бота")
+	print("--public-id: ID сообщества, в котором живёт бот")
+	print("--print-user: Если присутствует, в консоль будут выводится сообщения с данными пользователя при входящем сообщении")
+	print("--tg-report-token: Токен бота в Telegram для уведомлений")
+	print("--tg-report-id: ID пользователя для отправки уведомлений в Telegram")
+	exit()
+
+def getArg(argname, args):
+	"""Парсит аргументы и возвращает значение по названию"""
+	arg_index = args.index(argname)
+	if arg_index == -1:
+		return None
+	try:
+		return args[arg_index + 1]
+	except IndexError:
+		printUsage(argname, 2)
+
 def main(args):
 	"""Входная точка программы"""
-	# Проверяем аргументы
-	if not "-t" in args:
-		print2("Отсутствует параметр -t. Использование -t <vk token> [--print-user]", 'red')
-		sys.exit(1)
+	if "-h" in args or "--help" in args:
+		printUsage(None, None)
+
+	# Проверяем и парсим аргументы
+	required = ("--bot-token", "--public-id")
+	for arg in required:
+		if not arg in args:
+			printUsage(arg, 1)
+
+	vk_token = getArg('--bot-token', args)
+	public_id = getArg('--public-id', args)
+
+	tg_report_token = getArg('--tg-report-token', args)
+	tg_report_id = getArg('--tg-report-id', args)
 
 	# Инициализируем БД
 	database.start()
 
 	# Авторизация ВКонтакте
-	session = api.start(args)
+	session = api.start(vk_token, public_id, tg_report_token, tg_report_id)
 
 	# Инициализация бота
 	__dir__ = os.path.dirname(os.path.abspath(__file__))
-	bot = Bot(session, __dir__, '--print-user' in args)
+	bot = Bot(session, __dir__, '--print-user' in args, public_id)
 
 	# Настройка логирования
 	logging.basicConfig(

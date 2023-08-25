@@ -147,6 +147,14 @@ def start():
 		"PRIMARY KEY('id'))"
 	)
 
+	# Таблица function_names
+	cur.execute(
+		"CREATE TABLE IF NOT EXISTS function_names("
+		"id INTEGER,"
+		"name TEXT,"
+		"PRIMARY KEY('id'))"
+	)
+
 	# Таблица occupancy_cache - кэширование занятости кабинетов
 	# day - дата
 	# place - место
@@ -502,6 +510,38 @@ def getUsersByMask(mask):
 		'SELECT vk_id FROM users '
 		'WHERE gid IN (SELECT id FROM groups WHERE (course||spec) LIKE ?) AND allows_mail=1',
 		(mask.replace("*", "%"),)
+	).fetchall()
+
+# Статистика
+def getStatsFunctionUsageAllTime():
+	"""Количество использований функций за всё время"""
+	return cur.execute(
+		"SELECT name, function_names.id AS fn_id, COUNT(stats.id) AS cnt FROM function_names "
+		"LEFT JOIN stats ON stats.func_id=function_names.id "
+		"GROUP BY function_names.id"
+	).fetchall()
+
+def getStatsFunctionUsageLastMonth():
+	"""Количество использований функций за всё время"""
+	return cur.execute(
+		"SELECT "
+			"name,"
+			"CASE "
+				"WHEN julianday('now', 'localtime') - julianday(stats.date_create) < 30 THEN "
+					"COUNT(*) "
+				"ELSE "
+					"0 "
+				"END cnt "
+		"FROM function_names "
+		"LEFT JOIN stats ON stats.func_id=function_names.id "
+		"GROUP BY function_names.id"
+	).fetchall()
+
+def getStatsByGroups():
+	return cur.execute(
+		"SELECT groups.course||groups.spec AS gname, stats.func_id AS stat_id, COUNT(stats.id) AS cnt FROM groups "
+		"LEFT JOIN stats ON stats.caller_gid = groups.id "
+		"GROUP BY groups.id, stats.id"
 	).fetchall()
 
 if __name__ == "__main__":

@@ -6,38 +6,31 @@ import vk_api
 import requests
 import json
 
-def start(args):
+def start(bot_token, public_id, tg_report_token, tg_report_id):
 	"""Авторизуется во ВКонтакте, сохраняет несколько глобальных переменных"""
-
-	# Получаем токен из аргументов
-	token_flag_index = args.index("-t")
-	try:
-		bot_token = args[token_flag_index + 1]
-	except IndexError:
-		# Не указан токен после -t
-		print2("Не указан токен после параметра -t", 'red')
-		sys.exit(1)
 
 	# Авторизуемся
 	global API
 	global PHOTOUPLOAD_URL
+	global FILEUPLOAD_URL
 
 	session = vk_api.VkApi(token=bot_token)
 	API = session.get_api()
 	PHOTOUPLOAD_URL = API.photos.getMessagesUploadServer()["upload_url"]
+	FILEUPLOAD_URL = API.docs.getMessagesUploadServer(peer_id=public_id)['upload_url']
 
 	# Уведомления в телеграм об ошибках
 	global TG_REPORT_TOKEN
 	global TG_REPORT_ID
 	global TG_REPORT
-	TG_REPORT = ('--tg-report-token' in args) or ('--tg-report-id' in args)
+	TG_REPORT = (tg_report_token != None) or (tg_report_id != None)
 	if TG_REPORT:
-		if not '--tg-report-token' in args:
-			print2('Не указан --tg-report-token', 'red')
-			sys.exit(0)
-		if not '--tg-report-id' in args:
-			print2('Не указан --tg-report-id', 'red')
-			sys.exit(0)
+		if not tg_report_token:
+			print2('Указан tg-report-id, но не указан --tg-report-token', 'red')
+			exit()
+		if not tg_report_id:
+			print2('Указан tg-report-token, но не указан --tg-report-id', 'red')
+			exit()
 
 		TG_REPORT_TOKEN = args[args.index('--tg-report-token') + 1]
 		TG_REPORT_ID = args[args.index('--tg-report-id') + 1]
@@ -84,6 +77,21 @@ def uploadImage(image_path):
 
 	# Получение id изображения
 	return API.photos.saveMessagesPhoto(server=response["server"], photo=response["photo"], hash=response["hash"])[0]["id"]
+
+def uploadDocument(path):
+	"""Загружает файл с диска и получает id для параметра attachment"""
+	try:
+		with open(path, 'rb') as f:
+			response = requests.post(FILEUPLOAD_URL, files={"file": f})
+	except FileNotFoundError:
+		return
+
+	if not response.ok:
+		return
+
+	response = API.docs.save(response)
+	print(response)
+
 
 def answerCallback(event_id, vid, peer_id):
 	"""Отвечает на callback кнопку"""
