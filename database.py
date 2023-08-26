@@ -541,6 +541,7 @@ def getStatsByGroups():
 	return cur.execute(
 		"SELECT groups.course||groups.spec AS gname, stats.func_id AS stat_id, COUNT(stats.id) AS cnt FROM groups "
 		"LEFT JOIN stats ON stats.caller_gid = groups.id "
+		"WHERE groups.course < 5 "
 		"GROUP BY groups.id, stats.id"
 	).fetchall()
 
