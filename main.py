@@ -952,7 +952,7 @@ class Bot:
 					api.tgAlert('https://vk.com/id'+str(vid), 'Новый пользователь техбота')
 				else:
 					# Не первый запуск
-					if 'payload' in event.obj.message:
+					if 'payload' in event.obj.message and len(event.obj.message['payload']) > 0:
 						message_data = json.loads(event.obj.message['payload'])
 						need_update = self.handleMessageWithPayload(message_data, user, message_id)
 					else:
