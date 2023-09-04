@@ -320,7 +320,7 @@ def getScheduleDataForTeacher(date, teacher_id):
 			"LEFT JOIN schedules ON schedules.id = pairs.schedule_id "
 			"LEFT JOIN groups ON groups.id = schedules.gid "
 		"WHERE pairs_places.teacher_id = ? AND schedules.day=?"
-		"ORDER BY pairs.sort",
+		"ORDER BY pairs.sort ASC",
 		(teacher_id, date)
 	).fetchall()
 	if not response:
@@ -542,7 +542,8 @@ def getStatsByGroups():
 		"SELECT groups.course||groups.spec AS gname, stats.func_id AS stat_id, COUNT(stats.id) AS cnt FROM groups "
 		"LEFT JOIN stats ON stats.caller_gid = groups.id "
 		"WHERE groups.course < 5 "
-		"GROUP BY groups.id, stats.id"
+		"GROUP BY groups.id, stats.id "
+		"ORDER BY groups.course"
 	).fetchall()
 
 def addStatRecord(user_gid, user_type, fn_id):
