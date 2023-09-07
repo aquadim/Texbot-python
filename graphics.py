@@ -217,7 +217,7 @@ class GradesGenerator(TableGenerator):
 		table = soup.find('table')
 		if not table:
 			return 3
-		soup = table.findAll('tr')
+		rows = table.findAll('tr')
 
 		for y in range(1, len(rows)):
 			cells = rows[y].findAll('td')
