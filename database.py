@@ -320,7 +320,7 @@ def getScheduleDataForTeacher(date, teacher_id):
 			"LEFT JOIN schedules ON schedules.id = pairs.schedule_id "
 			"LEFT JOIN groups ON groups.id = schedules.gid "
 		"WHERE pairs_places.teacher_id = ? AND schedules.day=?"
-		"ORDER BY pairs.sort ASC",
+		"ORDER BY pairs.ptime ASC",
 		(teacher_id, date)
 	).fetchall()
 	if not response:
