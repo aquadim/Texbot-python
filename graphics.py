@@ -394,7 +394,7 @@ def makeTableImage(data, line_size_constraints, table_title, table_title_line_si
 				# Обнаружена двойка
 				color2 = theme['red'][y % 2]
 				need_gradient = True
-			elif y != 0 and len(data[y][1]) > 0 and data[y][1].find("2") == -1 and data[y][1].find("3") == -1 and data[y][1].find("4") == -1:
+			elif y != 0 and len(data[y][1]) > 0 and data[y][1].find("2") == -1 and data[y][1].find("3") == -1 and data[y][1].find("4") == -1 and data[y][1].find("5") != -1:
 				# Только пятёрки
 				color2 = theme['purple'][y % 2]
 				need_gradient = True
