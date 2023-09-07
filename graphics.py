@@ -175,6 +175,12 @@ class GradesGenerator(TableGenerator):
 				'Не удалось собрать оценки, так как неизвестны твои логин и пароль от дневника либо они неверны.',
 				self.keyboard
 			)
+		elif status == 3:
+			api.edit(
+				self.vid,
+				self.msg_id,
+				"Не удалось собрать оценки - нет таблицы оценок"
+			)
 
 	def generateImage(self):
 		# Авторизация в ЭЖ
@@ -208,7 +214,10 @@ class GradesGenerator(TableGenerator):
 
 		# Парсим
 		data = [('Дисциплина', 'Оценки', 'Средний балл')]
-		rows = soup.find('table').findAll('tr')
+		table = soup.find('table')
+		if not table:
+			return 3
+		soup = table.findAll('tr')
 
 		for y in range(1, len(rows)):
 			cells = rows[y].findAll('td')
