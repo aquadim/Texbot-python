@@ -57,7 +57,8 @@ class Bot:
 	def __init__(self, session, directory, print_user, public_id):
 		"""Инициализация"""
 		self.dir = directory
-		self.tasks = []
+		self.tasks = {}
+		self.completed_tasks = []
 		self.print_user = print_user
 		self.public_id = public_id
 
@@ -81,29 +82,39 @@ class Bot:
 	def getRandomWaitText(self):
 		return self.answers['wait'+str(random.randint(0,7))]
 
-	def completeTask(self, thread):
-		"""Очищает завершившиеся асинхронные процессы"""
-		if thread.has_exception:
-			try:
-				api.send(thread.vid, self.answers['exception'].format(str(thread.exception)))
-				api.tgErrorReport(str(thread.exception))
-			except:
-				pass
+	def markTaskAsFinished(self, task_code):
+		"""Помечает задачу выполненной"""
+		self.completed_tasks.append(task_code)
 
-		if type(thread) == graphics.GroupScheduleGenerator:
-			if thread.successful:
+	def checkFinishedTasks(self):
+		"""Завершает задачи которые отработали"""
+		for task_code in self.completed_tasks:
+			task = self.tasks[task_code]
+
+			if task.has_exception:
+				try:
+					api.send(task.vid, self.answers['exception'].format(str(task.exception)))
+					api.tgErrorReport(str(task.exception))
+				except:
+					print2("Не удалось отправить уведомление об ошибке в процессе", "red")
+
+			elif type(task) == graphics.GroupScheduleGenerator and task.successful:
 				# Сохраняем photo_id для сгенерированного расписания
-				database.addCacheToSchedule(thread.schedule_id, thread.photo_id)
+				database.addCacheToSchedule(task.schedule_id, task.photo_id)
 
-		elif type(thread) == graphics.TeacherScheduleGenerator:
-			if thread.successful:
-				database.addCachedScheduleOfTeacher(thread.date, thread.teacher_id, thread.photo_id)
+			elif type(task) == graphics.TeacherScheduleGenerator and task.successful:
+				# Сохраняем photo_id для сгенерированного расписания преподавателя
+				database.addCachedScheduleOfTeacher(task.date, task.teacher_id, task.photo_id)
 
-		elif type(thread) == graphics.GradesGenerator:
-			if thread.successful:
-				database.addGradesRecord(thread.user_id, thread.photo_id)
+			elif type(task) == graphics.GradesGenerator and task.successful:
+				# Сохраняем photo_id для сгенерированной таблицы оценок
+				database.addGradesRecord(task.user_id, task.photo_id)
 
-		self.tasks.remove(thread)
+			# Освобождаем память
+			task.join()
+			del task
+			self.tasks.pop(task_code)
+			self.completed_tasks.remove(task_code)
 
 	def checkIfCancelled(self, text, user):
 		"""Проверяет если пользователь запросил отмену. Если да - то возвращаем его в хаб"""
@@ -356,16 +367,26 @@ class Bot:
 
 		# Расписание кэшировано?
 		if response['photo_id']:
+			# Прикол для Виталия :P
+			if vid == 240088163:
+				api.send(vid, self.getRandomWaitText())
 			api.send(vid, None, None, 'photo-'+str(self.public_id)+'_'+str(response['photo_id']))
 			return
 
-		# Прикол для Виталия :P
-		if vid == 240088163:
-			api.send(vid, self.getRandomWaitText())
-
 		# Нет кэшированного изображения, делаем
 		msg_id = api.send(vid, self.getRandomWaitText())
-		self.tasks.append(graphics.GroupScheduleGenerator(
+
+		schedule_id = database.getScheduleId(gid, date)
+		pairs = database.getPairsForGroup(schedule_id)
+		if not pairs:
+			api.edit(self.vid, self.msg_id, self.answers['no-data'])
+			return
+		group_name = database.getGroupName(gid)
+
+		task_code = 'gsg-' + str(random.randint(0,99999))
+
+		task = graphics.GroupScheduleGenerator(
+			task_code,
 			vid,
 			self.public_id,
 			self.themes['rasp'],
@@ -373,9 +394,12 @@ class Bot:
 			'group-schedule',
 			msg_id,
 			date,
-			gid
-		))
-		self.tasks[-1].start()
+			pairs,
+			group_name,
+			schedule_id
+		)
+		self.tasks[task_code] = task
+		self.tasks[task_code].start()
 
 	def answerShowScheduleForTeacher(self, vid, msg_id, date, teacher_id):
 		"""Показ расписания для преподавателя"""
@@ -925,6 +949,9 @@ class Bot:
 
 		for event in self.longpoll.listen():
 			if event.type == VkBotEventType.MESSAGE_NEW:
+				# Проверяем завершившиеся события
+				self.checkFinishedTasks()
+
 				# Новое текстовое сообщение
 				text = event.obj.message['text']		# Текст сообщения
 				vid = event.obj.message['peer_id']		# ID отправившего

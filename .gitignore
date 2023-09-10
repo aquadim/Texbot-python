@@ -5,3 +5,7 @@ db.sqlite3
 fillData.py
 *sqlite3-shm
 *sqlite3-wal
+bin/*
+lib/*
+lib64
+pyvenv.cfg

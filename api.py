@@ -112,7 +112,7 @@ def tgAlert(text, prefix):
 	"""Уведомляет кого то о чём то"""
 	if not TG_REPORT:
 		return
-	text = '<pre>'+prefix+'</pre>'+text
+	text = '<pre>'+prefix+' </pre>'+text
 	try:
 		r = requests.get('https://api.telegram.org/bot{0}/sendMessage?chat_id={1}&text={2}&parse_mode=html'.format(TG_REPORT_TOKEN, TG_REPORT_ID, text))
 	except:

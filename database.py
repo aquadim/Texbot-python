@@ -10,7 +10,7 @@ def dict_factory(cursor, row):
         d[col[0]] = row[idx]
     return d
 
-db = sql.connect("db.sqlite3", isolation_level=None, timeout=10, check_same_thread=False)
+db = sql.connect("db.sqlite3")
 db.row_factory = dict_factory
 db.execute("PRAGMA journal_mode=WAL")
 cur = db.cursor()
@@ -292,7 +292,7 @@ def getPairsForGroup(schedule_id):
 		"ORDER BY pairs.sort ",
 		(schedule_id,)
 	).fetchall()
-	pairs = []
+	pairs = [("Время", "Дисциплина", "Место проведения")]
 	for row in response:
 		pairs.append((row['pair_time'], row['pair_name'], row['pair_place']))
 	return pairs

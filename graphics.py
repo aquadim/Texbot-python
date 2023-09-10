@@ -5,7 +5,6 @@ import api
 import threading
 import os
 import random
-import database
 import logging
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from utils import *
@@ -21,8 +20,9 @@ FONT_TITLE = ImageFont.truetype(__dir__ + '/fonts/OpenSans-Regular.ttf', 30)
 
 class TableGenerator(threading.Thread):
 	"""Класс для генерации таблиц"""
-	def __init__(self, vid, public_id, theme, parent, img_name):
+	def __init__(self, code, vid, public_id, theme, parent, img_name):
 		super().__init__()
+		self.code = code
 		self.vid = vid
 		self.public_id = public_id
 		self.theme = theme
@@ -65,7 +65,7 @@ class TableGenerator(threading.Thread):
 			print2(str(e), 'red')
 		self.finished = True
 
-		self.parent.completeTask(self)
+		self.parent.markTaskAsFinished(self.code)
 
 	def run(self):
 		"""Старт процесса"""
@@ -96,8 +96,8 @@ class TableGenerator(threading.Thread):
 
 class ScheduleGenerator(TableGenerator):
 	"""Класс для асинхронной генерации изображений таблиц расписания"""
-	def __init__(self, vid, public_id, theme, parent, name, msg_id, date):
-		super().__init__(vid, public_id, theme, parent, name)
+	def __init__(self, code, vid, public_id, theme, parent, name, msg_id, date):
+		super().__init__(code, vid, public_id, theme, parent, name)
 		self.msg_id = msg_id
 		self.date = date
 
@@ -107,8 +107,6 @@ class ScheduleGenerator(TableGenerator):
 	def onFail(self, status):
 		if status == 1:
 			api.edit(self.vid, self.msg_id, 'Произошла ошибка')
-		elif status == 2:
-			api.edit(self.vid, self.msg_id, '(Нет данных)')
 
 class TeacherScheduleGenerator(ScheduleGenerator):
 	"""Класс для асинхронной генерации изображений таблиц расписания преподавателей"""
@@ -133,20 +131,17 @@ class TeacherScheduleGenerator(ScheduleGenerator):
 
 class GroupScheduleGenerator(ScheduleGenerator):
 	"""Класс для асинхронной генерации изображений таблиц расписания групп"""
-	def __init__(self, vid, public_id, theme, parent, name, msg_id, date, gid):
-		super().__init__(vid, public_id, theme, parent, name, msg_id, date)
-		self.gid = gid
+	def __init__(self, code, vid, public_id, theme, parent, name, msg_id, date, pairs, group_name, schedule_id):
+		super().__init__(code, vid, public_id, theme, parent, name, msg_id, date)
+		self.pairs = pairs
+		self.group_name = group_name
+		self.schedule_id = schedule_id
 
 	def generateImage(self):
-		self.schedule_id = database.getScheduleId(self.gid, self.date)
-		data = database.getPairsForGroup(self.schedule_id)
-		if not data:
-			return 2
-		data.insert(0, ("Время", "Дисциплина", "Место проведения"))
 		return makeTableImage(
-			data,
+			self.pairs,
 			(0, 40, 25),
-			f"Расписание группы {database.getGroupName(self.gid)} на {getDateName(self.date)}",
+			f"Расписание группы {self.group_name} на {getDateName(self.date)}",
 			35,
 			False,
 			self.theme
