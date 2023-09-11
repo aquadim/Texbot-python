@@ -345,7 +345,7 @@ def addCachedScheduleOfTeacher(date, teacher_id, photo_id):
 def getMostRecentGradesImage(user_id):
 	"""Возвращает самое недавнее photo_id для оценок пользователя"""
 	# -10 minute - оценки за последние 10 минут
-	response = cur.execute("SELECT photo_id FROM users_grades WHERE date_create > datetime('now', 'localtime', '-10 minute') ORDER BY date_create DESC LIMIT 1").fetchone()
+	response = cur.execute("SELECT photo_id FROM users_grades WHERE user_id=? AND date_create > datetime('now', 'localtime', '-10 minute') ORDER BY date_create DESC LIMIT 1", (user_id,)).fetchone()
 	if not response:
 		return False
 	else:
