@@ -64,7 +64,7 @@ def getDateList(word_doc, now):
 				# Совпадает! Значит высока вероятность того, что год угадан правильно
 				output.append(f'{now.year + i}-{dd(month)}-{dd(day)}')
 				break
-		
+
 		output.append(False)
 
 	return output
@@ -74,7 +74,7 @@ def parseTable(table, date):
 	rows = table.rows
 	height = len(rows)
 	width = len(rows[0].cells)
-	
+
 	# Проверяем точное ли это расписание или нет
 	is_uncertain = rows[0].cells[0].paragraphs[0].runs[0].font.color.rgb != None
 	if is_uncertain:
@@ -103,7 +103,7 @@ def parseTable(table, date):
 				current_groups_row.append(database.cmdGetGidFromString(data[y][x]))
 			y += 1
 		else:
-			for x in range(0, len(data[y]), 2):
+			for x in range(0, len(data[y]) - 1, 2):
 				# Проверка правильности
 				if len(data[y][x + 1]) < 2:
 					# Названия пар не бывают такими короткими
@@ -146,7 +146,7 @@ def parseTable(table, date):
 def parseDocument(word_doc, table_dates, now, today, tomorrow):
 	"""Парсит документ"""
 	start_time = time.time()
-	
+
 	# На сегодня
 	try:
 		today_index = table_dates.index(today)
@@ -154,7 +154,7 @@ def parseDocument(word_doc, table_dates, now, today, tomorrow):
 		today_index = -1
 	if today_index != -1:
 		parseTable(word_doc.tables[today_index], today)
-	
+
 	# На завтра
 	try:
 		tomorrow_index = table_dates.index(tomorrow)
@@ -162,7 +162,7 @@ def parseDocument(word_doc, table_dates, now, today, tomorrow):
 		today_index = -1
 	if tomorrow_index != -1:
 		parseTable(word_doc.tables[tomorrow_index], tomorrow)
-		
+
 	database.makeSchedulesCleanable()
 	database.db.commit()
 	database.db.close()
@@ -179,14 +179,14 @@ def downloadAndCheck(f, now, today, tomorrow, __dir__):
 		return False
 	with open(__dir__ + "/tmp/schedule.doc", "wb") as f:
 		f.write(s.content)
-	
+
 	# Конвертируем в docx
 	subprocess.call(["lowriter", "--convert-to", "docx", __dir__+"/tmp/schedule.doc", "--outdir", __dir__+"/tmp/"])
-	
+
 	# Смотрим какие даты у этого документа есть
 	word_doc = Document(__dir__+"/tmp/schedule.docx")
 	table_dates = getDateList(word_doc, now)
-	
+
 	if not today in table_dates and not tomorrow in table_dates:
 		# Нет подходящих нам дат
 		print2("Нет подходящих дат", "red")
@@ -203,20 +203,20 @@ def updateSchedule(__dir__, redownload):
 		now = datetime.datetime.now()
 		date_today = now.strftime("%Y-%m-%d")
 		date_tomorrow = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-		
+
 		# Загрузка файла расписания из файла специально для Техбота
 		print("Скачиваем rasp2.doc")
 		response = downloadAndCheck("http://www.vpmt.ru/docs/rasp2.doc", now, date_today, date_tomorrow, __dir__)
 		if response:
 			parseDocument(response[0], response[1], now, date_today, date_tomorrow)
 			return
-		
+
 		print2("Скачиваем rasp.doc", "red")
 		response = downloadAndCheck("http://www.vpmt.ru/docs/rasp.doc", now, date_today, date_tomorrow, __dir__)
 		if response:
 			parseDocument(response[0], response[1], now, date_today, date_tomorrow)
 			return
-		
+
 		# Нет подходящих дат, ничего не делаем
 		print2("Нет дат", "red")
 
