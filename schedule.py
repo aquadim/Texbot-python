@@ -12,6 +12,12 @@ import hashlib
 from docx import Document
 from utils import *
 
+# Статус функции downloadAndCheck
+ALL_FOUND = 0
+FOUND_TODAY = 1
+FOUND_TOMORROW = 2
+NOT_FOUND = 3
+
 def downloadScheduleFile(name):
 	try:
 		return requests.get(name)
@@ -143,40 +149,20 @@ def parseTable(table, date):
 			y += 2
 	print2(f'Таблица на дату {date} готова!', 'green')
 
-def parseDocument(word_doc, table_dates, now, today, tomorrow):
+def parseDocument(word_doc, date_index, date, now):
 	"""Парсит документ"""
-	start_time = time.time()
-
-	# На сегодня
-	try:
-		today_index = table_dates.index(today)
-	except ValueError:
-		today_index = -1
-	if today_index != -1:
-		parseTable(word_doc.tables[today_index], today)
-
-	# На завтра
-	try:
-		tomorrow_index = table_dates.index(tomorrow)
-	except ValueError:
-		today_index = -1
-	if tomorrow_index != -1:
-		parseTable(word_doc.tables[tomorrow_index], tomorrow)
-
-	database.makeSchedulesCleanable()
+	parseTable(word_doc.tables[date_index], date)
 	database.db.commit()
-	database.db.close()
-
 	end_time = time.time()
-	print(f'Время парсинга таблиц: {end_time - start_time}')
 
 def downloadAndCheck(f, now, today, tomorrow, __dir__):
 	"""Скачивает файл расписания и проверяет его на нужные нам даты"""
 	# Скачиваем файл
+	print(f"Скачиваем {f}")
 	s = downloadScheduleFile(f)
 	if not s:
 		print2(f"Не удалось скачать f", "red")
-		return False
+		return (NOT_FOUND, word_doc)
 	with open(__dir__ + "/tmp/schedule.doc", "wb") as f:
 		f.write(s.content)
 
@@ -187,43 +173,92 @@ def downloadAndCheck(f, now, today, tomorrow, __dir__):
 	word_doc = Document(__dir__+"/tmp/schedule.docx")
 	table_dates = getDateList(word_doc, now)
 
-	if not today in table_dates and not tomorrow in table_dates:
-		# Нет подходящих нам дат
-		print2("Нет подходящих дат", "red")
-		return False
-	else:
-		print2("Подходящие даты найдены", "green")
-		return word_doc, table_dates
+	try:
+		today_index = table_dates.index(today)
+		has_today = True
+	except ValueError:
+		has_today = False
 
-def updateSchedule(__dir__, redownload):
+	try:
+		tomorrow_index = table_dates.index(tomorrow)
+		has_tomorrow = True
+	except ValueError:
+		has_tomorrow = False
+
+	if has_today and has_tomorrow:
+		print2("Обе даты найдены", "green")
+		return (ALL_FOUND, word_doc, today_index, tomorrow_index)
+
+	elif not has_today and has_tomorrow:
+		print2("Завтра найдено", "green")
+		return (FOUND_TOMORROW, word_doc, tomorrow_index)
+
+	elif has_today and not has_tomorrow:
+		print2("Сегодня найдено", "green")
+		return (FOUND_TODAY, word_doc, today_index)
+
+	else:
+		print2("Ничего не найдено", "red")
+		return (NOT_FOUND, word_doc)
+
+def updateSchedule(__dir__):
 	"""Загружает расписание, обновляет его в БД"""
 
-	if redownload:
-		# Составляем даты которые нам нужны на сегодня
-		now = datetime.datetime.now()
-		date_today = now.strftime("%Y-%m-%d")
-		date_tomorrow = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+	# Составляем даты которые нам нужны на сегодня
+	now = datetime.datetime.now()
+	date_today = now.strftime("%Y-%m-%d")
+	date_tomorrow = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
 
-		# Загрузка файла расписания из файла специально для Техбота
-		print("Скачиваем rasp2.doc")
-		response = downloadAndCheck("http://www.vpmt.ru/docs/rasp2.doc", now, date_today, date_tomorrow, __dir__)
-		if response:
-			parseDocument(response[0], response[1], now, date_today, date_tomorrow)
-			return
+	# Загрузка файла расписания из файла специально для Техбота
+	response = downloadAndCheck("http://www.vpmt.ru/docs/rasp2.doc", now, date_today, date_tomorrow, __dir__)
+	status = response[0]
+	word_doc = response[1]
 
-		print2("Скачиваем rasp.doc", "red")
-		response = downloadAndCheck("http://www.vpmt.ru/docs/rasp.doc", now, date_today, date_tomorrow, __dir__)
-		if response:
-			parseDocument(response[0], response[1], now, date_today, date_tomorrow)
-			return
+	if status == ALL_FOUND:
+		parseDocument(word_doc, response[2], date_today, now)
+		parseDocument(word_doc, response[3], date_tomorrow, now)
+		exit()
+	elif status == FOUND_TODAY:
+		parseDocument(word_doc, response[2], date_today, now)
+	elif status == FOUND_TOMORROW:
+		parseDocument(word_doc, response[2], date_tomorrow, now)
+	else:
+		pass
 
-		# Нет подходящих дат, ничего не делаем
-		print2("Нет дат", "red")
+	# Если программа ещё не вышла, то мы не нашли все даты. Попытка #2 с другим файлом
+	old_status = status
+	response = downloadAndCheck("http://www.vpmt.ru/docs/rasp.doc", now, date_today, date_tomorrow, __dir__)
+	status = response[0]
+	word_doc = response[1]
+	
+	if status == ALL_FOUND:
+		if old_status == NOT_FOUND:
+			# В прошлой попытке ничего не нашли, генерируем всё заново
+			parseDocument(word_doc, response[2], date_today, now)
+			parseDocument(word_doc, response[3], date_tomorrow, now)
+		elif old_status == FOUND_TODAY:
+			# В прошлой попытке уже нашли на сегодня, не делаем на сегодня
+			parseDocument(word_doc, response[2], date_today, now)
+		elif old_status == FOUND_TOMORROW:
+			# В прошлой попытке уже нашли на сегодня, не делаем на сегодня
+			parseDocument(word_doc, response[2], date_tomorrow, now)			
+		exit()
+		
+	elif status == FOUND_TODAY:
+		# Если в новой попытке мы снова нашли только сегодня, то не выполняем расчёты, заканчиваем программу
+		if old_status == FOUND_TODAY:
+			exit()
+		parseDocument(word_doc, response[2], date_today, now)
+	
+	elif status == FOUND_TOMORROW:
+		# Если в новой попытке мы снова нашли только завтра, то не выполняем расчёты, заканчиваем программу
+		if old_status == FOUND_TOMORROW:
+			exit()
+		parseDocument(word_doc, response[2], date_tomorrow, now)
+
+	database.makeSchedulesCleanable()
+	database.db.close()
 
 if __name__ == "__main__":
 	__dir__ = os.path.dirname(__file__)
-	if '-h' in sys.argv:
-		print('Использование: python schedule.py [-r]\n\n-r: Загрузить файл расписания')
-		sys.exit()
-
-	updateSchedule(__dir__, '-r' in sys.argv)
+	updateSchedule(__dir__)
