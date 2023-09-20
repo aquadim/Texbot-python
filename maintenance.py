@@ -3,7 +3,7 @@
 
 import api
 import sys
-import utils
+from utils import *
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 
 def printUsage(problem_arg, problem_type):
