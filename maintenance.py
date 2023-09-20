@@ -15,6 +15,7 @@ def printUsage(problem_arg, problem_type):
 
 	print("Использование: python maintenance.py --bot-token")
 	print("--bot-token: Токен ВК бота")
+	print("--public-id: ID сообщества, в котором живёт бот")
 	exit()
 
 def getArg(argname, args):
@@ -31,27 +32,33 @@ def main(args):
 	if "-h" in args or "--help" in args:
 		printUsage(None, None)
 
-	required = ("--bot-token",)
+	required = ("--bot-token", "--public-id")
 	for arg in required:
 		if not arg in args:
 			printUsage(arg, 1)
 
 	vk_token = getArg('--bot-token', args)
+	public_id = int(getArg('--public-id', args))
+
 	session = api.start(vk_token, None, None)
+	longpoll = VkBotLongPoll(session, group_id=public_id)
 
 	print2("Режим разработки активирован", "green")
-	for event in self.longpoll.listen():
 
-		# Получаем vid
-		if event.type == VkBotEventType.MESSAGE_NEW:
-			vid = event.obj.message['peer_id']
-		elif event.type == VkBotEventType.MESSAGE_EVENT:
-			vid = event.obj.peer_id
+	try:
+		for event in longpoll.listen():
 
-		# Отвечаем
-		api.send(vid, "Техбот находится в режиме разработки в данный момент. Повтори запрос позже")
+			# Получаем vid
+			if event.type == VkBotEventType.MESSAGE_NEW:
+				vid = event.obj.message['peer_id']
+			elif event.type == VkBotEventType.MESSAGE_EVENT:
+				vid = event.obj.peer_id
 
-	print2("Режим разработки деактивирован", "red")
+			# Отвечаем
+			api.send(vid, "Техбот находится в режиме разработки в данный момент. Повтори запрос позже")
+
+	except KeyboardInterrupt:
+		print2("Режим разработки деактивирован", "red")
 
 if __name__ == "__main__":
 	main(sys.argv)
